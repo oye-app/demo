@@ -1,0 +1,12 @@
+# OYE · Person focus
+- [ ] Edición desde el nombre y eliminación confirmada con pruebas del flujo.
+- [x] Alta inmediata de personas solo en demo, Carmen disponible y pruebas del flujo.
+- [x] Remove Lovable login option and collect validated phone and age in person requests.
+- [x] Clean visible person names and add ID-scoped portraits to selectors and personal headers.
+- [x] Stable identities, verified relationships and restricted private reads.
+- [x] Family requests and administrative approval controls implemented.
+- [x] Person selector and shared URL context across summary, calls, history and care.
+- [x] Minimal volunteer opportunities and exclusive visit actions.
+- [x] Scoped analysis, schedules, notifications and missing-data wellbeing.
+- [x] Rule tests and authenticated demo flow checks; viewport validation.
+- [ ] Verify administrative approval with a real administrator session. Blocker: requester has no matching auth account; do not choose another real account without approval.

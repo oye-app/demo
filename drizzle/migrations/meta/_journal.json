@@ -1,0 +1,139 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1792246260998,
+      "tag": "0000_admin_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792246717350,
+      "tag": "0001_referrals_checkins",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792247171903,
+      "tag": "0002_profiles_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792247698670,
+      "tag": "0003_alert_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792248047260,
+      "tag": "0004_call_schedules",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792248684367,
+      "tag": "0005_volunteer_flow",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792248854612,
+      "tag": "0006_alerts_status_arrived",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792249622701,
+      "tag": "0007_care_and_loneliness",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792309445632,
+      "tag": "0008_call_duration_ai_loneliness",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792313442666,
+      "tag": "0009_person_identity_and_verified_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792313648390,
+      "tag": "0010_demo_scope_and_access_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792313708211,
+      "tag": "0011_isolate_demo_visit_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792313888401,
+      "tag": "0012_expand_visible_alert_record",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792314003341,
+      "tag": "0013_care_identity_and_visit_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792315112057,
+      "tag": "0014_restrict_organization_reads",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792320227529,
+      "tag": "0015_person_request_contact_age",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792762311478,
+      "tag": "0016_immediate_demo_person",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792762623705,
+      "tag": "0017_manage_person_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793916120264,
+      "tag": "0018_create_call_logs",
+      "breakpoints": true
+    }
+  ]
+}

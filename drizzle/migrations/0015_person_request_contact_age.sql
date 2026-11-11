@@ -1,0 +1,2 @@
+ALTER TABLE public.person_links ADD COLUMN requested_phone text, ADD COLUMN requested_age integer;
+ALTER TABLE public.person_links ADD CONSTRAINT person_links_requested_phone_valid CHECK (requested_phone IS NULL OR (char_length(trim(requested_phone)) BETWEEN 5 AND 30 AND requested_phone ~ '^[0-9+ ()-]+$' AND char_length(regexp_replace(requested_phone, '[^0-9]', '', 'g')) >= 5)), ADD CONSTRAINT person_links_requested_age_valid CHECK (requested_age IS NULL OR requested_age BETWEEN 0 AND 120);
