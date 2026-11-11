@@ -100,9 +100,8 @@ export const startCall = createServerFn({ method: "POST" })
         "[startCall] MAKE_START_CALL_URL no está configurada en las variables de entorno. Registrando llamada localmente para desarrollo."
       );
       // In local dev without Make URL, we can record a row so the UI can demonstrate the flow
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const fakeConversationId = `dev-${crypto.randomUUID()}`;
-      await supabaseAdmin.from("call_logs").insert({
+      await context.supabase.from("call_logs").insert({
         conversation_id: fakeConversationId,
         person_id: senior.id,
         nombre: senior.name.split(" ")[0],

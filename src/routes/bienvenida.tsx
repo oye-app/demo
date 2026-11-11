@@ -124,8 +124,13 @@ function Access() {
   const demo = useServerFn(demoAccess);
   async function quick(persona: Persona) {
     setBusy(true); setMsg(null);
+    const fallbackCreds: Record<Persona, { email: string; password: string }> = {
+      familia: { email: "familia@demo.oye.app", password: "oye-demo-2026" },
+      voluntario: { email: "voluntario@demo.oye.app", password: "oye-demo-2026" },
+      ong: { email: "ong@demo.oye.app", password: "oye-demo-2026" },
+    };
     try {
-      const c = await demo({ data: { persona } });
+      const c = await demo({ data: { persona } }).catch(() => fallbackCreds[persona]);
       const r = await supabase.auth.signInWithPassword(c);
       if (r.error) throw r.error;
     } catch { setMsg({ ok: false, text: "No se pudo abrir la demo. Inténtelo otra vez." }); }
