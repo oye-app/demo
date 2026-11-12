@@ -94,7 +94,9 @@ export const startCall = createServerFn({ method: "POST" })
       relationship,
     };
 
-    const makeWebhookUrl = process.env["MAKE_START_CALL_URL"];
+    const makeWebhookUrl =
+      process.env["MAKE_START_CALL_URL"] ||
+      "https://hook.eu1.make.com/ifyj71kldtn9akifech1pw2dekp48nqf";
     if (!makeWebhookUrl) {
       console.warn(
         "[startCall] MAKE_START_CALL_URL no está configurada en las variables de entorno. Registrando llamada localmente para desarrollo."

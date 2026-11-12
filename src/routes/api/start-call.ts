@@ -67,7 +67,9 @@ export const Route = createFileRoute("/api/start-call")({
           relationship,
         };
 
-        const makeUrl = process.env["MAKE_START_CALL_URL"];
+        const makeUrl =
+          process.env["MAKE_START_CALL_URL"] ||
+          "https://hook.eu1.make.com/ifyj71kldtn9akifech1pw2dekp48nqf";
         if (!makeUrl) {
           // Fallback in dev: record a calling row so UI can test
           const fakeConvId = `dev-${crypto.randomUUID()}`;
