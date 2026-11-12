@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
-import { Brain, ChevronDown, Phone, ShieldAlert, Sparkles, Clock, CheckCircle2 } from "lucide-react";
-import { Chip, Screen, btn } from "@/components/oye";
+import { useEffect, useState } from "react";
+import { Brain, ChevronDown } from "lucide-react";
+import { Screen, btn } from "@/components/oye";
 import { AlertTimeline } from "@/components/alert-timeline";
 import { PersonGate } from "@/components/person-context";
 import { personSearch, usePerson } from "@/lib/people";
@@ -17,7 +17,10 @@ export const Route = createFileRoute("/_authenticated/historial")({
   head: () => ({
     meta: [
       { title: "Historial de llamadas · OYE" },
-      { name: "description", content: "Todas las llamadas de OYE, con su duración y lo que la IA entendió en cada una." },
+      {
+        name: "description",
+        content: "Todas las llamadas de OYE, con su duración y lo que la IA entendió en cada una.",
+      },
       { property: "og:title", content: "Historial de llamadas · OYE" },
       { property: "og:description", content: "Cada llamada, con su detalle." },
       { property: "og:type", content: "website" },
@@ -31,7 +34,20 @@ function HistoryEntry() {
   const { profile } = useMe();
   const { sid } = usePerson();
   if (profile.persona === "voluntario" && !sid) return <HistoryPage />;
-  return <PersonGate><HistoryPage /></PersonGate>;
+  return (
+    <PersonGate>
+      <HistoryPage />
+    </PersonGate>
+  );
+}
+
+function formatSec(sec?: number | null): string {
+  if (!sec || sec <= 0) return "En curso";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m === 0) return `${s} s`;
+  if (s === 0) return `${m} min`;
+  return `${m} min ${s} s`;
 }
 
 function HistoryPage() {
@@ -41,10 +57,19 @@ function HistoryPage() {
   const { data: callLogs = [], isLoading: loadingLogs } = useAllCallLogs(sid);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const title = profile.persona === "voluntario" ? "Mis visitas" : `Llamadas a ${personDisplayName(person?.name ?? "")}`;
+  // Auto-open the most recent call log when first loaded
+  useEffect(() => {
+    if (openId === null && callLogs.length > 0 && callLogs[0]?.id) {
+      setOpenId(callLogs[0].id);
+    }
+  }, [callLogs, openId]);
 
-  // Filter legacy alerts for volunteer or current person
-  const legacyList = alerts.filter((a) => (!sid || a.senior_id === sid) && (profile.persona !== "voluntario" || a.volunteer_id === user.id));
+  const title =
+    profile.persona === "voluntario" ? "Mis visitas" : `Llamadas a ${personDisplayName(person?.name ?? "")}`;
+
+  const legacyList = alerts.filter(
+    (a) => (!sid || a.senior_id === sid) && (profile.persona !== "voluntario" || a.volunteer_id === user.id)
+  );
 
   const hasLogs = callLogs.length > 0;
   const isLoading = loadingLogs || loadingAlerts;
@@ -52,27 +77,26 @@ function HistoryPage() {
   return (
     <Screen title={title}>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-4">
-        {/* Realtime Call Logs from TRD flow */}
         {callLogs.map((log) => (
           <CallLogRowCard
             key={log.id}
             log={log}
             personName={personDisplayName(person?.name ?? log.nombre ?? "Mayor")}
             open={openId === log.id}
-            onToggle={() => setOpenId(openId === log.id ? null : log.id)}
+            onToggle={() => setOpenId(openId === log.id ? "" : log.id)}
           />
         ))}
 
-        {/* Legacy alerts (if any and not already covered by call logs) */}
-        {!hasLogs && legacyList.map((a) => (
-          <LegacyCallRow
-            key={a.id}
-            visit={profile.persona === "voluntario"}
-            a={a}
-            open={openId === a.id}
-            onToggle={() => setOpenId(openId === a.id ? null : a.id)}
-          />
-        ))}
+        {!hasLogs &&
+          legacyList.map((a) => (
+            <LegacyCallRow
+              key={a.id}
+              visit={profile.persona === "voluntario"}
+              a={a}
+              open={openId === a.id}
+              onToggle={() => setOpenId(openId === a.id ? "" : a.id)}
+            />
+          ))}
 
         {alertsError && !hasLogs && (
           <p role="alert" className="pt-10 text-center text-destructive">
@@ -114,6 +138,12 @@ function CallLogRowCard({
       ? "bg-success text-success-foreground"
       : "bg-muted text-muted-foreground";
 
+  const pct = log.global_pct ?? log.report?.global_pct;
+  const subtitleText =
+    log.report?.home_headline ||
+    log.motivo ||
+    (log.status === "completada" ? "Llamada completada con informe" : log.status.replace(/_/g, " "));
+
   return (
     <article className="overflow-hidden rounded-3xl bg-card shadow-card">
       <button
@@ -124,11 +154,16 @@ function CallLogRowCard({
       >
         <PersonAvatar id={log.person_id} name={personName} small />
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 font-bold">
+          <span className="flex flex-wrap items-center gap-1.5 font-bold">
             <span className="truncate">{personName}</span>
             {log.nivel_alerta && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${alertBadge}`}>
                 {log.nivel_alerta}
+              </span>
+            )}
+            {pct != null && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                {pct}% Bienestar
               </span>
             )}
             {log.status !== "completada" && (
@@ -137,15 +172,16 @@ function CallLogRowCard({
               </span>
             )}
           </span>
-          <span className="block text-xs capitalize text-muted-foreground">
-            {day} · {time} · {log.duracion_seg != null ? `${Math.round(log.duracion_seg / 60)} min` : "En curso"}
+          <span className="mt-0.5 block truncate text-xs font-medium text-foreground/85">{subtitleText}</span>
+          <span className="mt-0.5 block text-[11px] capitalize text-muted-foreground">
+            {day} · {time} · {formatSec(log.duracion_seg)}
           </span>
         </span>
         <ChevronDown className={`size-5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && (
-        <div className="animate-rise space-y-3 border-t p-4 pt-3">
+        <div className="animate-rise space-y-3 border-t p-3 pt-3">
           <SituationReportCard log={log} />
         </div>
       )}
@@ -153,35 +189,88 @@ function CallLogRowCard({
   );
 }
 
-function LegacyCallRow({ a, open, onToggle, visit = false }: { a: Alert; visit?: boolean; open: boolean; onToggle: () => void }) {
+function LegacyCallRow({
+  a,
+  open,
+  onToggle,
+  visit = false,
+}: {
+  a: Alert;
+  visit?: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const m = MOOD[a.mood as keyof typeof MOOD] ?? MOOD.bien;
   const d = new Date(a.created_at);
   const day = d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
   return (
     <article className="overflow-hidden rounded-3xl bg-card shadow-card">
-      <button type="button" onClick={onToggle} aria-expanded={open} className="tap flex w-full items-center gap-3 p-4 text-left">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="tap flex w-full items-center gap-3 p-4 text-left"
+      >
         <PersonAvatar id={a.senior_id} name={a.senior_name} small />
         <span className="min-w-0 flex-1">
-          <span className="block font-bold">{personDisplayName(a.senior_name)} · {visit ? STATUS[a.status as keyof typeof STATUS] : m.label}</span>
-          <span className="block text-xs capitalize text-muted-foreground">{day} · {fmtTime(a.created_at)} · {visit ? (a.visited_at ? `Visita · ${fmtTime(a.visited_at)}` : "Visita en curso") : a.is_simulated ? `${a.duration_min ?? "—"} min estimados · Demo` : `${a.duration_min ?? "—"} min`}</span>
+          <span className="block font-bold">
+            {personDisplayName(a.senior_name)} · {visit ? STATUS[a.status as keyof typeof STATUS] : m.label}
+          </span>
+          <span className="block text-xs capitalize text-muted-foreground">
+            {day} · {fmtTime(a.created_at)} ·{" "}
+            {visit
+              ? a.visited_at
+                ? `Visita · ${fmtTime(a.visited_at)}`
+                : "Visita en curso"
+              : a.is_simulated
+              ? `${a.duration_min ?? "—"} min estimados · Demo`
+              : `${a.duration_min ?? "—"} min`}
+          </span>
         </span>
         <ChevronDown className={`size-5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <div className="animate-rise space-y-3 border-t px-4 pt-3 pb-4">
           <div className="flex flex-wrap gap-1.5">
-            <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-bold text-secondary-foreground">{NEED[a.need as keyof typeof NEED]}</span>
-            {a.loneliness_score != null && <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold">{lonelyLabel(a.loneliness_score)} · {a.loneliness_score}/9</span>}
-            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold">{STATUS[a.status as keyof typeof STATUS]}</span>
+            <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-bold text-secondary-foreground">
+              {NEED[a.need as keyof typeof NEED]}
+            </span>
+            {a.loneliness_score != null && (
+              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold">
+                {lonelyLabel(a.loneliness_score)} · {a.loneliness_score}/9
+              </span>
+            )}
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold">
+              {STATUS[a.status as keyof typeof STATUS]}
+            </span>
           </div>
-          {visit && a.senior_id && <Link to="/" search={{sid:a.senior_id,aid:a.id}} className={btn("ghost","sm")}>Abrir visita</Link>}
+          {visit && a.senior_id && (
+            <Link to="/" search={{ sid: a.senior_id, aid: a.id }} className={btn("ghost", "sm")}>
+              Abrir visita
+            </Link>
+          )}
           <p className="text-sm leading-snug">{a.summary}</p>
-          {a.memory_note && <p className="flex gap-2 rounded-2xl bg-secondary p-3 text-sm text-secondary-foreground"><Brain className="mt-0.5 size-4 shrink-0" />{a.memory_note}</p>}
+          {a.memory_note && (
+            <p className="flex gap-2 rounded-2xl bg-secondary p-3 text-sm text-secondary-foreground">
+              <Brain className="mt-0.5 size-4 shrink-0" />
+              {a.memory_note}
+            </p>
+          )}
           {a.signals.length > 0 && (
-            <ul className="flex flex-wrap gap-1.5">{a.signals.map((s) => <li key={s} className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{s}</li>)}</ul>
+            <ul className="flex flex-wrap gap-1.5">
+              {a.signals.map((s) => (
+                <li key={s} className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">
+                  {s}
+                </li>
+              ))}
+            </ul>
           )}
           {a.status !== "closed" && <AlertTimeline a={a} />}
-          {a.visit_note && <p className="rounded-xl bg-success/10 p-2.5 text-sm font-semibold">{a.volunteer_name}: «{a.visit_note}»</p>}
+          {a.visit_note && (
+            <p className="rounded-xl bg-success/10 p-2.5 text-sm font-semibold">
+              {a.volunteer_name}: «{a.visit_note}»
+            </p>
+          )}
         </div>
       )}
     </article>
