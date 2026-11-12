@@ -37,6 +37,8 @@ const HUMAN_LABELS: Record<string, string> = {
   CONFIRMADA: "Confirmada",
   DUDOSA: "Dudosa",
   NO_TOMADA: "Pendiente",
+  NO_MENCIONADO: "No mencionado",
+  NO_MENCIONADA: "No mencionada",
   FLUIDO_ORIENTADO: "Fluido y orientado",
   LENTITUD_MONOSILABOS: "Pausado / Monosílabos",
   DESORIENTACION_CONFUSION: "Desorientación detectada",
