@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState, useEffect } from "react";
 import {
   ChevronRight,
+  ChevronLeft,
   ClipboardList,
   Phone,
   Settings2,
@@ -10,6 +11,9 @@ import {
   Users,
   ShieldAlert,
   ChevronDown,
+  Clock,
+  Heart,
+  CheckCircle2,
 } from "lucide-react";
 import { Screen, Segmented, BigButton, btn } from "@/components/oye";
 import { AlertCard } from "@/components/alert-card";
@@ -353,21 +357,32 @@ function PeopleSelector() {
 
 function SelectedVisit() {
   const { user } = useMe();
-  const { data = [] } = useAlerts();
-  const { aid } = Route.useSearch();
+  const { aid, sid } = Route.useSearch();
   const { data: all = [] } = useAlerts(true);
   const active = all.find((a) => a.volunteer_id === user.id && ["accepted", "arrived"].includes(a.status));
-  const alert = data.find((a) => a.id === aid);
+  const alert = aid
+    ? (all.find((a) => a.id === aid) ?? all.find((a) => a.senior_id === sid && a.status === "open"))
+    : (all.find((a) => a.senior_id === sid && a.status === "open") ??
+      all.find((a) => a.senior_id === sid) ??
+      all[0]);
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+      <Link
+        to="/"
+        className="tap inline-flex min-h-10 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
+      >
+        <ChevronLeft className="size-4" />
+        Volver a la lista de avisos
+      </Link>
       {alert ? (
         <AlertCard
           a={alert}
-          showTranscript={false}
+          showTranscript={true}
           actions={<VisitActions a={alert} userId={user.id} busyElsewhere={!!active && active.id !== alert.id} />}
         />
       ) : (
-        <p className="py-8 text-center text-muted-foreground">Este aviso ya no está disponible.</p>
+        <p className="py-8 text-center text-muted-foreground">Este aviso ya no está disponible o ha sido atendido.</p>
       )}
     </div>
   );
@@ -556,9 +571,10 @@ const URGENT_MIN = 30;
 function NgoHome() {
   const [choosing, setChoosing] = useState(false);
   const { data: people = [] } = usePeople();
-  const { data = [] } = useAlerts();
+  const { data = [] } = useAlerts(true);
+  const { data: allCallLogs = [] } = useAllCallLogs();
   const { user } = useMe();
-  const [tab, setTab] = useState<"open" | "accepted" | "visited">("open");
+  const [tab, setTab] = useState<"open" | "accepted" | "visited" | "seniors">("open");
   const today = data.filter((a) => new Date(a.created_at).toDateString() === new Date().toDateString());
   const open = data
     .filter((a) => a.status === "open")
@@ -575,17 +591,17 @@ function NgoHome() {
     { k: "open" as const, l: "Sin atender", n: open.length },
     { k: "accepted" as const, l: "En camino", n: accepted.length },
     { k: "visited" as const, l: "Hechas hoy", n: visited.length },
+    { k: "seniors" as const, l: "Personas", n: people.length },
   ];
   const list = tab === "open" ? open : tab === "accepted" ? accepted : visited;
   return (
     <>
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-extrabold">Panel de avisos</h1>
+        <div>
+          <h1 className="text-3xl font-extrabold">Panel de coordinación</h1>
+          <p className="text-xs font-semibold text-muted-foreground">Asociación y Red de Cuidados Comunitarios</p>
+        </div>
         <div className="flex gap-2">
-          <BigButton size="sm" tone="ghost" onClick={() => setChoosing(!choosing)}>
-            <Users className="size-5" />
-            Personas
-          </BigButton>
           <Link
             to="/admin"
             aria-label="Administrar datos"
@@ -595,72 +611,135 @@ function NgoHome() {
           </Link>
         </div>
       </div>
-      {choosing && (
-        <div className="mt-3 max-h-48 overflow-y-auto">
-          {people.map((p) => (
-            <Link
-              key={p.id}
-              to="/"
-              search={{ sid: p.id }}
-              className="tap flex min-h-12 items-center gap-3 border-b py-2 font-semibold"
-            >
-              <PersonAvatar id={p.id} name={p.name} small />
-              <span className="min-w-0 flex-1 truncate">{personDisplayName(p.name)}</span>
-              <ChevronRight className="size-5" />
-            </Link>
-          ))}
+
+      <div className="grid grid-cols-3 gap-2 pt-2">
+        <div className="rounded-2xl border bg-card p-3 text-center">
+          <span className="block text-2xl font-black text-foreground">{people.length}</span>
+          <span className="block text-xs font-semibold text-muted-foreground">Mayores</span>
         </div>
-      )}
-      <p className="text-sm text-muted-foreground">{today.length} llamadas hoy</p>
+        <div className="rounded-2xl border bg-card p-3 text-center">
+          <span className="block text-2xl font-black text-primary">{today.length}</span>
+          <span className="block text-xs font-semibold text-muted-foreground">Llamadas hoy</span>
+        </div>
+        <div
+          className={`rounded-2xl border p-3 text-center ${
+            urgent > 0 ? "border-destructive/40 bg-destructive/10" : "bg-card"
+          }`}
+        >
+          <span className={`block text-2xl font-black ${urgent > 0 ? "text-destructive" : "text-warning"}`}>
+            {open.length}
+          </span>
+          <span className="block text-xs font-semibold text-muted-foreground">Avisos activos</span>
+        </div>
+      </div>
+
       {urgent > 0 && (
-        <p role="alert" className="mt-3 rounded-2xl bg-destructive/10 p-3 text-sm font-semibold text-destructive">
-          {urgent} {urgent === 1 ? "aviso urgente" : "avisos urgentes"}: nadie ha acudido aún. Asigne a alguien o vaya
-          usted.
+        <p role="alert" className="mt-2 rounded-2xl bg-destructive/10 p-3 text-sm font-semibold text-destructive">
+          🚨 {urgent} {urgent === 1 ? "aviso urgente" : "avisos urgentes"}: llevan más de 30 min esperando o sin respuesta. La ONG debe coordinar la visita.
         </p>
       )}
-      <div className="mt-3">
-        <Segmented value={tab} onChange={setTab} items={tabs.map((t) => ({ ...t, alert: t.k === "open" }))} />
+
+      <div className="mt-2">
+        <Segmented value={tab} onChange={setTab} items={tabs.map((t) => ({ ...t, alert: t.k === "open" && open.length > 0 }))} />
       </div>
+
       <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pb-2">
-        {list.map((a) => (
-          <div key={a.id}>
-            {a.status === "open" && (
-              <p
-                className={`mb-1 px-2 text-xs font-bold ${
-                  waited(a) >= URGENT_MIN || a.mood === "no_contesta" ? "text-destructive" : "text-muted-foreground"
-                }`}
-              >
-                Esperando {waited(a) < 60 ? `${waited(a)} min` : `${Math.round(waited(a) / 60)} h`}
-                {a.mood === "no_contesta" ? " · No contesta: la ONG debe ir" : ""}
-              </p>
-            )}
-            <Link
-              to="/"
-              search={{ sid: a.senior_id ?? undefined }}
-              className="tap mb-2 inline-flex min-h-11 items-center gap-1 text-sm font-bold text-primary"
-            >
-              Ver persona
-              <ChevronRight className="size-4" />
-            </Link>
-            <AlertCard
-              a={a}
-              showTranscript={false}
-              actions={<VisitActions a={a} userId={user.id} busyElsewhere={!!active} />}
-            />
+        {tab === "seniors" ? (
+          <div className="space-y-2">
+            <ul className="divide-y rounded-2xl border bg-card p-2 shadow-sm">
+              {people.map((p) => {
+                const latestCall = allCallLogs.find((c) => c.person_id === p.id);
+                const seniorAlert = open.find((a) => a.senior_id === p.id);
+
+                let badge = "Sin llamadas hoy";
+                let badgeClass = "bg-muted text-muted-foreground";
+
+                if (seniorAlert) {
+                  badge = seniorAlert.mood === "no_contesta" ? "No contesta" : "Aviso abierto";
+                  badgeClass = "bg-destructive text-destructive-foreground";
+                } else if (latestCall?.status === "completada") {
+                  if (latestCall.nivel_alerta === "ROJO") {
+                    badge = "Alerta Roja";
+                    badgeClass = "bg-destructive text-destructive-foreground";
+                  } else if (latestCall.nivel_alerta === "AMARILLO") {
+                    badge = "Alerta Amarilla";
+                    badgeClass = "bg-warning text-warning-foreground";
+                  } else {
+                    badge = `Verde · ${latestCall.global_pct ?? 88}%`;
+                    badgeClass = "bg-success text-success-foreground";
+                  }
+                } else if (latestCall?.status === "llamando") {
+                  badge = "Llamando...";
+                  badgeClass = "bg-primary text-primary-foreground";
+                }
+
+                return (
+                  <li key={p.id} className="flex items-center justify-between gap-3 p-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <PersonAvatar id={p.id} name={p.name} small />
+                      <div className="min-w-0">
+                        <p className="truncate font-bold">{personDisplayName(p.name)}</p>
+                        <p className="text-xs text-muted-foreground">{p.relation || "Barrio Chamberí"}</p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${badgeClass}`}>{badge}</span>
+                      <Link
+                        to="/"
+                        search={{ sid: p.id }}
+                        className="tap inline-flex size-9 items-center justify-center rounded-full bg-secondary text-primary"
+                        aria-label={`Ver ficha de ${p.name}`}
+                      >
+                        <ChevronRight className="size-4" />
+                      </Link>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
-        ))}
-        {!list.length && (
+        ) : (
+          list.map((a) => (
+            <div key={a.id}>
+              {a.status === "open" && (
+                <p
+                  className={`mb-1 px-2 text-xs font-bold ${
+                    waited(a) >= URGENT_MIN || a.mood === "no_contesta" ? "text-destructive" : "text-muted-foreground"
+                  }`}
+                >
+                  Esperando {waited(a) < 60 ? `${waited(a)} min` : `${Math.round(waited(a) / 60)} h`}
+                  {a.mood === "no_contesta" ? " · No contesta: la ONG debe ir" : ""}
+                </p>
+              )}
+              <Link
+                to="/"
+                search={{ sid: a.senior_id ?? undefined }}
+                className="tap mb-2 inline-flex min-h-11 items-center gap-1 text-sm font-bold text-primary"
+              >
+                Ver persona
+                <ChevronRight className="size-4" />
+              </Link>
+              <AlertCard
+                a={a}
+                showTranscript={true}
+                actions={<VisitActions a={a} userId={user.id} busyElsewhere={!!active} />}
+              />
+            </div>
+          ))
+        )}
+
+        {tab !== "seniors" && !list.length && (
           <div className="space-y-3 pt-4 text-center">
             <p className="text-muted-foreground">
               {tab === "open"
-                ? "Ningún aviso sin atender. ¡Buen trabajo!"
+                ? "Ningún aviso sin atender. ¡Todo el barrio cubierto!"
                 : tab === "accepted"
                 ? "Nadie en camino ahora."
-                : "Aún no hay visitas hoy."}
+                : "Aún no hay visitas completadas hoy."}
             </p>
             {tab === "open" && (
-              <BigButton tone="ghost" onClick={() => setChoosing(true)}>
-                Elegir persona para llamar
+              <BigButton tone="ghost" onClick={() => setTab("seniors")}>
+                Ver censo de personas
               </BigButton>
             )}
           </div>

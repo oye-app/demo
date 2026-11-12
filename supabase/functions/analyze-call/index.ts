@@ -17,31 +17,58 @@ function parseTranscriptTurns(rawTranscript: string, rawArray?: any[]): Turn[] {
   if (Array.isArray(rawArray) && rawArray.length > 0) {
     return rawArray
       .map((t: any) => {
-        const r = String(t.role || t.who || "").toLowerCase();
+        if (typeof t === "string") {
+          const m = t.match(/^(?:(?:\[(\d+(?:\.\d+)?)s?\]\s*)?(AGENT|AGENTE|OYE|ASISTENTE|IA|AI|BOT|USER|USUARIO|PERSONA MAYOR|PERSONA|MAYOR|PACIENTE|CARMEN|ANTONIO|PILAR|MANUEL)\s*(?:\[(\d+(?:\.\d+)?)s?\])?\s*:\s*)(.+)$/i);
+          if (m) {
+            const sp = m[2].toUpperCase();
+            const role: "agent" | "user" = ["AGENT", "AGENTE", "OYE", "ASISTENTE", "IA", "AI", "BOT"].includes(sp) ? "agent" : "user";
+            const timeSec = m[1] ? Math.round(Number(m[1])) : m[3] ? Math.round(Number(m[3])) : undefined;
+            return { role, timeSec, text: m[4].trim() };
+          }
+          return { role: "user" as const, text: t.trim() };
+        }
+        const r = String(t.role || t.who || t.speaker || "").toLowerCase();
         const role: "agent" | "user" =
-          r.includes("user") || r.includes("mayor") || r.includes("usuario") || r.includes("carmen") || r.includes("antonio")
+          r.includes("user") || r.includes("mayor") || r.includes("usuario") || r.includes("persona") || r.includes("carmen") || r.includes("antonio") || r.includes("customer") || r.includes("human")
             ? "user"
             : "agent";
-        const text = String(t.message ?? t.text ?? "").trim();
+        const text = String(t.message ?? t.text ?? t.content ?? t.transcript ?? "").trim();
         const timeSec = typeof t.time_in_call_secs === "number" ? t.time_in_call_secs : undefined;
         return { role, timeSec, text };
       })
-      .filter((t) => t.text.length > 0);
+      .filter((t) => t.text.length > 0 && t.text !== "null" && t.text !== "undefined");
   }
 
-  const lines = rawTranscript
+  // Also check if rawTranscript is a JSON array string or contains concatenated [time] SPEAKER: or SPEAKER [time]: turns on the same line
+  const trimmedRaw = rawTranscript.trim();
+  if (trimmedRaw.startsWith("[") && trimmedRaw.endsWith("]")) {
+    try {
+      const parsedArr = JSON.parse(trimmedRaw);
+      if (Array.isArray(parsedArr) && parsedArr.length > 0) {
+        return parseTranscriptTurns("", parsedArr);
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Split any inline turns that were concatenated without newlines (e.g., "AGENT [0s]: ... USER [6s]: ..." or "[0s] OYE: ... [6s] PERSONA: ...")
+  const normalizedTranscript = rawTranscript
+    .replace(/\s+(?=(?:\[\d+(?:\.\d+)?s?\]\s*)?(?:AGENT|AGENTE|OYE|ASISTENTE|IA|AI|BOT|USER|USUARIO|PERSONA MAYOR|PERSONA|MAYOR|PACIENTE|CARMEN|ANTONIO)\s*(?:\[\d+(?:\.\d+)?s?\])?\s*:)/gi, "\n");
+
+  const lines = normalizedTranscript
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
   const turns: Turn[] = [];
   const lineRegex =
-    /^(AGENT|AGENTE|OYE|ASISTENTE|IA|AI|BOT|USER|USUARIO|PERSONA MAYOR|MAYOR|PACIENTE|CARMEN|ANTONIO|PILAR|MANUEL)\s*(?:\[(\d+(?:\.\d+)?)s?\])?\s*:\s*(.+)$/i;
+    /^(?:\[(\d+(?:\.\d+)?)s?\]\s*)?(AGENT|AGENTE|OYE|ASISTENTE|IA|AI|BOT|USER|USUARIO|PERSONA MAYOR|PERSONA|MAYOR|PACIENTE|CARMEN|ANTONIO|PILAR|MANUEL)\s*(?:\[(\d+(?:\.\d+)?)s?\])?\s*:\s*(.+)$/i;
 
   for (const line of lines) {
     const m = line.match(lineRegex);
     if (m) {
-      const speakerRaw = m[1].toUpperCase();
+      const speakerRaw = m[2].toUpperCase();
       const role: "agent" | "user" =
         speakerRaw === "AGENT" ||
         speakerRaw === "AGENTE" ||
@@ -52,9 +79,9 @@ function parseTranscriptTurns(rawTranscript: string, rawArray?: any[]): Turn[] {
         speakerRaw === "BOT"
           ? "agent"
           : "user";
-      const timeSec = m[2] ? Math.round(Number(m[2])) : undefined;
-      const text = m[3].trim();
-      if (text) {
+      const timeSec = m[1] ? Math.round(Number(m[1])) : m[3] ? Math.round(Number(m[3])) : undefined;
+      const text = m[4].trim();
+      if (text && text !== "null" && text !== "undefined") {
         turns.push({ role, timeSec, text });
       }
     } else if (turns.length > 0 && !line.startsWith("-") && !/^(Datos de|Transcripci|Genera )/i.test(line)) {
@@ -101,17 +128,19 @@ function analyzeSpanishConversation(params: {
     }
   }
 
-  // Extract verbatim quotes spoken by the user (prefer substantive non-greeting sentences first)
+  // Extract verbatim quotes spoken by the user (prefer substantive non-greeting, non-question sentences sorted by clinical relevance/length)
+  const isConversationalFiller = (txt: string) =>
+    /^(hola|buenos d[ií]as|buenas tardes|s[ií]|no|vale|claro|adi[oó]s|hasta luego|c[oó]mo puedo ayudar|me puede repetir|d[ií]game|te escucho|le escucho|un momento)\b/i.test(
+      txt.replace(/^[.¿¡,\s]+/, "")
+    );
+
   const nonGreetingUserQuotes = userTurns
     .map((t) => t.text.trim())
-    .filter(
-      (txt) =>
-        txt.length >= 10 &&
-        !/^(hola|buenos d[ií]as|buenas tardes|s[ií]|no|vale|claro|adi[oó]s|hasta luego)\b/i.test(txt)
-    );
+    .filter((txt) => txt.length >= 12 && !isConversationalFiller(txt))
+    .sort((a, b) => b.length - a.length);
   const substantiveUserQuotes = userTurns
     .map((t) => t.text.trim())
-    .filter((txt) => txt.length >= 8 && !/^(hola|buenos d[ií]as|s[ií]|no|vale|claro|adi[oó]s|hasta luego)\.?!?$/i.test(txt));
+    .filter((txt) => txt.length >= 8 && !isConversationalFiller(txt));
 
   const fallbackUserQuotes = userTurns.map((t) => t.text.trim()).filter((txt) => txt.length > 0);
   const combinedQuotes = [...nonGreetingUserQuotes, ...substantiveUserQuotes.filter((q) => !nonGreetingUserQuotes.includes(q))];
@@ -155,7 +184,7 @@ function analyzeSpanishConversation(params: {
       sleepQuote = userA;
       if (/\b(fatal|muy mal|no dorm[ií]|no he dormido|no pegu[eé] ojo|en vela|casi nada|despert[eé] muchas)\b/i.test(sleepClause)) {
         sleepStatus = "ALERTA";
-      } else if (/\b(mal|regular|poco|cost[oó] dormir|desvelad[ao]|insomnio|me despert[eé])\b/i.test(sleepClause)) {
+      } else if (/\b(mal|regular|poco|cost[oó]\s*(?:mucho\s*)?dormir\w*|desvelad[ao]|insomnio|me despert[eé])\b/i.test(sleepClause)) {
         sleepStatus = "INSOMNIO_FATIGA";
       } else if (/\b(bien|muy bien|estupend|fenomenal|toda la noche|de un tir[oó]n|descans[eé]|s[ií])\b/i.test(sleepClause)) {
         sleepStatus = "CORRECTO";
@@ -163,7 +192,7 @@ function analyzeSpanishConversation(params: {
     }
   }
 
-  // 4. Analyze Food / Alimentación (Q&A and clause aware)
+  // 4. Analyze Food / Alimentación (Q&A and clause aware, including common STT homophones like "desafiné" -> "desayuné")
   let foodStatus: "CORRECTO" | "DESCUIDO" | "ALERTA" | "NO_MENCIONADO" = "NO_MENCIONADO";
   let foodQuote = "";
   for (const { agentQ, userA } of qaPairs) {
@@ -171,13 +200,13 @@ function analyzeSpanishConversation(params: {
     const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
     const foodClause =
       clauses.find((c) =>
-        /\b(desayun\w*|com[ií]\w*|comid[oa]|cen[eé]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|pur[eé]|pan|yogur|galleta\w*|hambre|apetito|cocin\w*)\b/i.test(c)
-      ) || (qAboutFood && !/\bpastilla|medicaci/i.test(userA) ? clauses[0] || userA : "");
+        /\b(desayun\w*|desafin\w*|com[ií]\w*|comid[oa]|cen[eé]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|pur[eé]|pan|yogur|galleta\w*|hambre|apetito|cocin\w*)\b/i.test(c)
+      ) || (qAboutFood && !/\bpastilla|medicaci|medicamento/i.test(userA) ? clauses[0] || userA : "");
     if (foodClause) {
       foodQuote = userA;
       if (/\b(no he comido nada|sin comer|no tengo nada de hambre|no quiero comer|no desayun[eé])\b/i.test(foodClause)) {
         foodStatus = "ALERTA";
-      } else if (/\b(todav[ií]a no|a[uú]n no|poca hambre|sin ganas|solo un poco|casi nada|no he desayunado)\b/i.test(foodClause)) {
+      } else if (/\b(todav[ií]a no|a[uú]n no|poca hambre|no ten[ií]a\s*(?:mucha\s*)?hambre|muy poco|sin ganas|solo un poco|casi nada|no he desayunado)\b/i.test(foodClause)) {
         foodStatus = "DESCUIDO";
       } else if (/\b(s[ií]|desayun\w*|com[ií]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|bien|ya tom[eé])\b/i.test(foodClause)) {
         foodStatus = "CORRECTO";
@@ -192,11 +221,11 @@ function analyzeSpanishConversation(params: {
     const qAboutMed = /\b(pastilla|medicaci[oó]n|medicamento|tratamiento|tensi[oó]n|enalapril|sintrom|dosis)\b/i.test(agentQ);
     const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
     const medClause =
-      clauses.find((c) => /\b(pastilla|medicaci[oó]n|medicamento|enalapril|sintrom|me la tom[eé]|ya la tom[eé]|se me olvid[oó]|se me hab[ií]a pasado|no me la he tomado)\b/i.test(c)) ||
+      clauses.find((c) => /\b(pastilla|medicaci[oó]n|medicamento|enalapril|sintrom|me la tom[eé]|ya la tom[eé]|olvid[eé]|olvid[oó]|se me hab[ií]a pasado|no me la he tomado)\b/i.test(c)) ||
       (qAboutMed && !/\bdesayun|caf[eé]|tostada/i.test(userA) ? clauses[0] || userA : "");
     if (medClause) {
       medQuote = userA;
-      if (/\b(no me la he tomado|no la tom[eé]|se me olvid[oó]|se me ha olvidado|se me hab[ií]a pasado|todav[ií]a no|a[uú]n no)\b/i.test(medClause)) {
+      if (/\b(no me la he tomado|no la tom[eé]|me olvid[eé]|se me olvid[oó]|se me ha olvidado|se me hab[ií]a pasado|todav[ií]a no|a[uú]n no)\b/i.test(medClause)) {
         medStatus = "NO_TOMADA";
       } else if (/\b(no me acuerdo|no s[eé] si|creo que|duda|luego me la tomo)\b/i.test(medClause)) {
         medStatus = "DUDOSA";
@@ -651,7 +680,26 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
+    const rawBodyText = await req.text().catch(() => "");
+    let body: Record<string, any> = {};
+    if (rawBodyText) {
+      try {
+        body = JSON.parse(rawBodyText);
+      } catch {
+        // Fallback: if Make sent unescaped newlines or raw text inside JSON, extract fields directly via regex
+        const convM = rawBodyText.match(/"conversation_id"\s*:\s*"([^"]+)"/) || rawBodyText.match(/ID de conversaci[oó]n:\s*([^\n"\\]+)/i);
+        const personM = rawBodyText.match(/"person_id"\s*:\s*"([^"]+)"/) || rawBodyText.match(/ID de persona:\s*([^\n"\\]+)/i);
+        const nameM = rawBodyText.match(/"name"\s*:\s*"([^"]+)"/) || rawBodyText.match(/Nombre:\s*([^\n"\\(]+)/i);
+        const durM = rawBodyText.match(/"duration_sec"\s*:\s*(\d+)/) || rawBodyText.match(/Duraci[oó]n[^:]*:\s*(\d+)/i);
+        body = {
+          conversation_id: convM?.[1]?.trim() || "",
+          person_id: personM?.[1]?.trim() || "",
+          name: nameM?.[1]?.trim() || "Carmen",
+          duration_sec: durM?.[1] ? Number(durM[1]) : 0,
+          transcript: rawBodyText,
+        };
+      }
+    }
 
     let rawTranscript = "";
     let rawTranscriptArray: any[] | undefined = undefined;
@@ -687,7 +735,12 @@ Deno.serve(async (req: Request) => {
       const sourceText = userMessages || body.messages.map((m: any) => m?.content || "").join("\n");
 
       const nameMatch = sourceText.match(/-\s*Nombre:\s*([^\n(]+)/i);
-      if (nameMatch?.[1]?.trim()) seniorName = nameMatch[1].trim();
+      if (nameMatch?.[1]?.trim()) {
+        const candidateName = nameMatch[1].trim();
+        if (!candidateName.startsWith("-") && !/^(ID|Edad|Relaci|Duraci|Acepta)/i.test(candidateName)) {
+          seniorName = candidateName;
+        }
+      }
 
       const personMatch = sourceText.match(/-\s*ID de persona:\s*([^\n]+)/i);
       if (personMatch?.[1]?.trim()) personId = personMatch[1].trim();
@@ -713,14 +766,39 @@ Deno.serve(async (req: Request) => {
       rawTranscriptArray = body.transcript;
     }
 
-    const turns = parseTranscriptTurns(rawTranscript, rawTranscriptArray);
+    // Sanitize seniorName if empty or placeholder
+    if (!seniorName || seniorName.trim() === "-" || seniorName.trim().startsWith("-") || /^(ID|null|undefined)/i.test(seniorName.trim())) {
+      seniorName = "Carmen";
+    }
+
+    let turns = parseTranscriptTurns(rawTranscript, rawTranscriptArray);
+
+    // Fallback: if Make S3's Text Aggregator only passed 1 turn (or 0 user turns) and we have conversationId + ELEVENLABS_API_KEY, fetch the full transcript from ElevenLabs
+    const elevenLabsKey = Deno.env.get("ELEVENLABS_API_KEY") || Deno.env.get("XI_API_KEY");
+    if (elevenLabsKey && conversationId && turns.filter((t) => t.role === "user").length === 0) {
+      try {
+        const elResp = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}`, {
+          headers: { "xi-api-key": elevenLabsKey },
+        });
+        if (elResp.ok) {
+          const elJson = await elResp.json();
+          if (Array.isArray(elJson?.transcript) && elJson.transcript.length > 0) {
+            turns = parseTranscriptTurns("", elJson.transcript);
+            console.log(`[analyze-call] Fetched ${turns.length} turns directly from ElevenLabs API for ${conversationId}`);
+          }
+        }
+      } catch (elErr) {
+        console.warn("[analyze-call] ElevenLabs fallback fetch error:", elErr);
+      }
+    }
+
     if (!durationSec || durationSec <= 0) {
       const maxTurnSec = turns.reduce((acc, t) => (t.timeSec && t.timeSec > acc ? t.timeSec : acc), 0);
       durationSec = maxTurnSec > 0 ? maxTurnSec + 8 : Math.max(20, turns.length * 8);
     }
 
     console.log(
-      `[analyze-call] senior=${seniorName} personId=${personId} convId=${conversationId} dur=${durationSec}s turns=${turns.length}`
+      `[analyze-call] senior=${seniorName} personId=${personId} convId=${conversationId} dur=${durationSec}s turns=${turns.length} userTurns=${turns.filter((t) => t.role === "user").length} rawSample=${JSON.stringify(rawTranscript.slice(0, 350))}`
     );
 
     const openAiKey = Deno.env.get("OPENAI_API_KEY");
