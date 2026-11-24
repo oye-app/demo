@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Clock, Download, FileCheck2, MapPin, Pill, ShieldCheck, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Clock, Download, FileCheck2, MapPin, Pill, Printer, ShieldCheck, TrendingUp } from "lucide-react";
 import { B2BModeSelector } from "@/components/b2b-meeting-panel";
 import {
   buildConsoleCsvExport,
@@ -48,8 +48,16 @@ export function AnalyticsPanel({
             Métricas en tiempo real calculadas sobre llamadas reales (`call_logs`), escalas UCLA-3 / Yesavage GDS-5 y despacho vecinal (30 días).
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 print:hidden">
           <B2BModeSelector />
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1.5 rounded-xl border bg-background px-3.5 py-2 text-xs font-bold hover:bg-secondary"
+          >
+            <Printer className="size-4 text-muted-foreground" />
+            Imprimir Memoria Ejecutiva A4
+          </button>
           <button
             type="button"
             onClick={handleExportCsv}

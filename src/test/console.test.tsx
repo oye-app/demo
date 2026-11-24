@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   buildClinicalChartSeries,
@@ -10,12 +10,16 @@ import {
   computeCohortUnitEconomics,
   computeDistrictCoverage,
   computeModelProvenanceBadge,
+  computePersonalVocalBaseline,
+  computePredictiveRiskRadar,
   computeSlaStatus,
   computeTodayScheduleCoverage,
   extractLifeStoryQuotes,
   parseSeniorCsv,
   rankVolunteersForSenior,
   SAMPLE_BARRIO_CSV,
+  signPayloadHmacSha256,
+  validateWebhookTargetUrl,
   type ConsoleCensusRow,
   type ConsoleCohortSummary,
   type ConsoleQaMetrics,
@@ -29,6 +33,8 @@ import { ClinicalTrajectoryChart } from "@/components/console/clinical-trajector
 import { FhirViewerCard } from "@/components/console/fhir-viewer-card";
 import { DailyAgendaPanel } from "@/components/console/daily-agenda-panel";
 import { VeracityAuditPanel } from "@/components/console/veracity-audit-panel";
+import { RiskRadarCard } from "@/components/console/risk-radar-card";
+import { LivePipelineTester } from "@/components/console/live-pipeline-tester";
 
 vi.mock("@tanstack/react-router", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
@@ -378,5 +384,229 @@ describe("OYE Consola Web Desktop & Lógica Clínica N1", () => {
 
     fireEvent.click(screen.getByText(/Cargar plantilla de barrio/i));
     expect(screen.getByText(/3 personas listas para importar/i)).toBeTruthy();
+  });
+
+  it("computePersonalVocalBaseline ignora filas legacy null y detecta desvío longitudinal real", () => {
+    const empty = computePersonalVocalBaseline([
+      makeCallLog({ id: "legacy", report: { nivel_alerta: "VERDE", global_pct: 80, home_headline: "Legacy", summary: "Legacy" } }),
+    ]);
+    expect(empty.sampleCount).toBe(0);
+    expect(empty.statusLabel).toBe("sin_datos");
+
+    const single = computePersonalVocalBaseline([makeCallLog()]);
+    expect(single.sampleCount).toBe(1);
+    expect(single.statusLabel).toBe("linea_base_inicial");
+    expect(single.deltaLexicalPct).toBe(0);
+
+    const logBase1 = makeCallLog({
+      id: "c1",
+      created_at: "2026-11-21T10:00:00Z",
+      report: {
+        nivel_alerta: "VERDE",
+        global_pct: 90,
+        home_headline: "Bien",
+        summary: "Llamada tranquila.",
+        evaluacion_escalas: {
+          indicadores_vocales_cognitivos: {
+            estado: "FLUIDO_ORIENTADO",
+            observacion: "Fluido",
+            biomarcadores: { palabras_totales: 120, palabras_por_respuesta: 20, riqueza_lexica_pct: 86, latencia_respuesta_seg: 2.0 },
+          },
+        },
+      },
+    });
+    const logBase2 = makeCallLog({
+      id: "c2",
+      created_at: "2026-11-22T10:00:00Z",
+      report: {
+        nivel_alerta: "VERDE",
+        global_pct: 88,
+        home_headline: "Bien",
+        summary: "Llamada tranquila.",
+        evaluacion_escalas: {
+          indicadores_vocales_cognitivos: {
+            estado: "FLUIDO_ORIENTADO",
+            observacion: "Fluido",
+            biomarcadores: { palabras_totales: 110, palabras_por_respuesta: 18, riqueza_lexica_pct: 84, latencia_respuesta_seg: 2.2 },
+          },
+        },
+      },
+    });
+    const logDrift = makeCallLog({
+      id: "c3",
+      created_at: "2026-11-24T10:00:00Z",
+      report: {
+        nivel_alerta: "AMARILLO",
+        global_pct: 62,
+        home_headline: "Seguimiento",
+        summary: "Respuestas escuetas.",
+        evaluacion_escalas: {
+          indicadores_vocales_cognitivos: {
+            estado: "LENTITUD_MONOSILABOS",
+            observacion: "Respuestas escuetas",
+            biomarcadores: { palabras_totales: 35, palabras_por_respuesta: 7, riqueza_lexica_pct: 60, latencia_respuesta_seg: 5.4 },
+          },
+        },
+      },
+    });
+
+    const drifted = computePersonalVocalBaseline([logBase1, logBase2, logDrift]);
+    expect(drifted.sampleCount).toBe(3);
+    expect(drifted.baselineLexicalPct).toBe(85);
+    expect(drifted.latestLexicalPct).toBe(60);
+    expect(drifted.deltaLexicalPct).toBe(-25);
+    expect(drifted.driftDetected).toBe(true);
+    expect(drifted.statusLabel).toBe("desvio_detectado");
+  });
+
+  it("computePredictiveRiskRadar explica factores y acciones prioritarias sin inventar datos", () => {
+    const stableRadar = computePredictiveRiskRadar({
+      senior: makeSenior({ latest_nivel_alerta: "VERDE", latest_ucla_score: 3, latest_yesavage_score: 0 }),
+      logs: [makeCallLog()],
+      now: new Date("2026-11-24T12:00:00Z"),
+    });
+    expect(stableRadar.tier).toBe("ESTABLE");
+    expect(stableRadar.score).toBeLessThan(22);
+
+    const riskySenior = makeSenior({
+      latest_nivel_alerta: "ROJO",
+      latest_global_pct: 40,
+      latest_ucla_score: 8,
+      latest_yesavage_score: 4,
+      latest_call_status: "no_contesta",
+      active_alert_id: "al-99",
+    });
+    const riskyLog1 = makeCallLog({
+      id: "r1",
+      created_at: "2026-11-20T10:00:00Z",
+      global_pct: 88,
+      report: {
+        nivel_alerta: "VERDE",
+        global_pct: 88,
+        home_headline: "Normal",
+        summary: "Llamada normal.",
+        evaluacion_escalas: {
+          indicadores_vocales_cognitivos: {
+            estado: "FLUIDO_ORIENTADO",
+            observacion: "Normal",
+            biomarcadores: { palabras_totales: 100, palabras_por_respuesta: 20, riqueza_lexica_pct: 85, latencia_respuesta_seg: 2.0 },
+          },
+        },
+      },
+    });
+    const riskyLog2 = makeCallLog({
+      id: "r2",
+      created_at: "2026-11-24T09:00:00Z",
+      global_pct: 42,
+      report: {
+        nivel_alerta: "ROJO",
+        global_pct: 42,
+        home_headline: "Alerta urgente",
+        summary: "No se tomó la pastilla y refiere dudas.",
+        recuerdo_biografico_nuevo: "Recordaba su juventud en Bilbao",
+        motivos_clinicos: ["soledad", "medicacion"],
+        evaluacion_escalas: {
+          autocuidado_y_salud: {
+            alimentacion_hidratacion: "DESCUIDO",
+            sueno_descanso: "ALERTA",
+            adherencia_medicacion: "NO_TOMADA",
+            evidencia_escuchada: "No se tomó la pastilla.",
+          },
+          indicadores_vocales_cognitivos: {
+            estado: "DESORIENTACION_CONFUSION",
+            observacion: "Dudas",
+            biomarcadores: { palabras_totales: 30, palabras_por_respuesta: 6, riqueza_lexica_pct: 55, latencia_respuesta_seg: 6.1 },
+          },
+        },
+      },
+    });
+
+    const criticalRadar = computePredictiveRiskRadar({
+      senior: riskySenior,
+      logs: [riskyLog1, riskyLog2],
+      now: new Date("2026-11-24T12:00:00Z"),
+    });
+    expect(criticalRadar.tier).toBe("CRITICO");
+    expect(criticalRadar.score).toBeGreaterThanOrEqual(70);
+    expect(criticalRadar.nextBestActions[0]?.actionType).toBe("call_now");
+
+    const lifeStories = extractLifeStoryQuotes([riskyLog2]);
+    expect(lifeStories[0]?.memoryHighlight).toBe("Recordaba su juventud en Bilbao");
+    expect(lifeStories[0]?.motivosClinicos).toEqual(["soledad", "medicacion"]);
+  });
+
+  it("validateWebhookTargetUrl bloquea SSRF interno y signPayloadHmacSha256 firma en hex sha256", async () => {
+    expect(validateWebhookTargetUrl("http://crm.example.com/hook").ok).toBe(false);
+    expect(validateWebhookTargetUrl("https://localhost/hook").ok).toBe(false);
+    expect(validateWebhookTargetUrl("https://127.0.0.1/hook").ok).toBe(false);
+    expect(validateWebhookTargetUrl("https://169.254.169.254/latest").ok).toBe(false);
+    expect(validateWebhookTargetUrl("https://10.0.0.5/api").ok).toBe(false);
+    expect(validateWebhookTargetUrl("https://192.168.1.20/api").ok).toBe(false);
+    expect(validateWebhookTargetUrl("https://crm.aseguradora.es/api/oye-webhook").ok).toBe(true);
+
+    const sig = await signPayloadHmacSha256('{"hello":"world"}', "secret-123");
+    expect(sig).toMatch(/^sha256=[a-f0-9]{64}$/);
+    const sig2 = await signPayloadHmacSha256('{"hello":"world"}', "secret-123");
+    expect(sig2).toBe(sig);
+  });
+
+  it("RiskRadarCard dispara callbacks y LivePipelineTester ejecuta auditoría sandbox sin escribir en DB", async () => {
+    const onAction = vi.fn();
+    const radar = computePredictiveRiskRadar({
+      senior: makeSenior({ latest_nivel_alerta: "AMARILLO", latest_ucla_score: 7, latest_call_status: "no_contesta" }),
+      logs: [makeCallLog()],
+      now: new Date("2026-11-24T12:00:00Z"),
+    });
+
+    const origFetch = globalThis.fetch;
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          model: "gpt-4o+verified",
+          nivel_alerta: "AMARILLO",
+          global_pct: 72,
+          call_validity: "verified_human",
+          motivos_clinicos: ["soledad", "social_positivo"],
+          recuerdo_biografico_nuevo: "Veranos en San Sebastián",
+          citas_textuales: ["la casa se me hace muy grande"],
+          summary: "Resumen verificado sandbox.",
+          evaluacion_escalas: {
+            soledad_ucla: { puntuacion_estimada: 6 },
+            animo_yesavage_gds5: { puntuacion_estimada: 1 },
+            autocuidado_y_salud: { adherencia_medicacion: "CONFIRMADA" },
+            indicadores_vocales_cognitivos: { biomarcadores: { riqueza_lexica_pct: 89 } },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    globalThis.fetch = mockFetch as typeof fetch;
+
+    try {
+      render(
+        <div>
+          <RiskRadarCard radar={radar} seniorName="Carmen López" onAction={onAction} />
+          <LivePipelineTester seniorName="Carmen López" />
+        </div>
+      );
+
+      expect(screen.getByText(/Radar Predictivo de Riesgo · Carmen López/i)).toBeTruthy();
+      fireEvent.click(screen.getByText(/Lanzar llamada OYE ahora/i));
+      expect(onAction).toHaveBeenCalledWith("call_now");
+
+      fireEvent.click(screen.getByText(/Ejecutar auditoría en vivo/i));
+
+      await waitFor(() => {
+        expect(screen.getByText(/gpt-4o\+verified/i)).toBeTruthy();
+        expect(screen.getByText(/Veranos en San Sebastián/i)).toBeTruthy();
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const callArgs = mockFetch.mock.calls[0];
+      const sentBody = JSON.parse(String((callArgs?.[1] as RequestInit | undefined)?.body || "{}"));
+      expect(sentBody.person_id).toBe("test-only-console-audit");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 });

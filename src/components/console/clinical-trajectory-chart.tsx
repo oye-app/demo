@@ -1,6 +1,6 @@
-import { Brain, BookOpen, MessageSquareQuote, TrendingDown, TrendingUp } from "lucide-react";
+import { Brain, BookOpen, MessageSquareQuote, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
 import type { CallLogRow } from "@/lib/call-logs";
-import { buildClinicalChartSeries, extractLifeStoryQuotes } from "@/lib/console";
+import { buildClinicalChartSeries, computePersonalVocalBaseline, extractLifeStoryQuotes } from "@/lib/console";
 
 export function ClinicalTrajectoryChart({
   seniorName,
@@ -10,6 +10,7 @@ export function ClinicalTrajectoryChart({
   logs: CallLogRow[];
 }) {
   const series = buildClinicalChartSeries(logs, 14);
+  const vocalBaseline = computePersonalVocalBaseline(logs);
   const quotes = extractLifeStoryQuotes(logs);
 
   if (series.points.length === 0) {
@@ -101,9 +102,20 @@ export function ClinicalTrajectoryChart({
           </div>
           <div className="rounded-2xl border bg-background/70 p-3">
             <span className="block text-[10px] font-semibold text-muted-foreground">Biomarcador Léxico</span>
-            <span className="text-lg font-black">
-              {series.latestLexicalPct !== null ? `${series.latestLexicalPct}%` : "En espera audio"}
+            <span className="text-lg font-black tabular-nums">
+              {vocalBaseline.latestLexicalPct !== null ? `${vocalBaseline.latestLexicalPct}%` : "En espera audio"}
             </span>
+            {vocalBaseline.sampleCount >= 2 && vocalBaseline.baselineLexicalPct !== null && (
+              <span
+                className={`mt-0.5 block text-[10px] font-bold tabular-nums ${
+                  vocalBaseline.driftDetected ? "text-destructive" : "text-muted-foreground"
+                }`}
+              >
+                Base propia {vocalBaseline.baselineLexicalPct}% (
+                {(vocalBaseline.deltaLexicalPct ?? 0) > 0 ? `+${vocalBaseline.deltaLexicalPct}` : vocalBaseline.deltaLexicalPct}
+                {" pts)"}
+              </span>
+            )}
           </div>
         </div>
 
@@ -184,6 +196,26 @@ export function ClinicalTrajectoryChart({
                   <MessageSquareQuote className="mt-0.5 size-3.5 shrink-0 text-primary" />
                   <span>«{q.quote}»</span>
                 </p>
+                {q.memoryHighlight && (
+                  <p className="flex items-start gap-1 rounded-xl border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-[11px] font-medium text-amber-950">
+                    <Sparkles className="mt-0.5 size-3 shrink-0 text-amber-600" />
+                    <span>
+                      <strong>Recuerdo:</strong> {q.memoryHighlight}
+                    </span>
+                  </p>
+                )}
+                {q.motivosClinicos.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {q.motivosClinicos.map((slug) => (
+                      <span
+                        key={slug}
+                        className="rounded-full bg-background px-2 py-0.5 text-[10px] font-bold text-slate-600 border"
+                      >
+                        #{slug}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <p className="text-[10px] font-bold text-muted-foreground">
                   {q.dateLabel} · Nivel {q.alertLevel}
                 </p>

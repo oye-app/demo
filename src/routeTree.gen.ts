@@ -21,6 +21,7 @@ import { Route as AuthenticatedLlamadaRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedPerfilRouteImport } from './routes/_authenticated/perfil'
 import { Route as AuthenticatedPersonaRouteImport } from './routes/_authenticated/persona'
 import { Route as ApiStartCallRouteImport } from './routes/api/start-call'
+import { Route as ApiConsoleWebhookTestRouteImport } from './routes/api/console/webhook-test'
 import { Route as ApiPublicCallLogsRouteImport } from './routes/api/public/call-logs'
 import { Route as ApiPublicJobsLlamadasRouteImport } from './routes/api/public/jobs/llamadas'
 
@@ -83,6 +84,11 @@ const ApiStartCallRoute = ApiStartCallRouteImport.update({
   path: '/api/start-call',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiConsoleWebhookTestRoute = ApiConsoleWebhookTestRouteImport.update({
+  id: '/api/console/webhook-test',
+  path: '/api/console/webhook-test',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicCallLogsRoute = ApiPublicCallLogsRouteImport.update({
   id: '/api/public/call-logs',
   path: '/api/public/call-logs',
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/perfil': typeof AuthenticatedPerfilRoute
   '/persona': typeof AuthenticatedPersonaRoute
   '/api/start-call': typeof ApiStartCallRoute
+  '/api/console/webhook-test': typeof ApiConsoleWebhookTestRoute
   '/api/public/call-logs': typeof ApiPublicCallLogsRoute
   '/api/public/jobs/llamadas': typeof ApiPublicJobsLlamadasRoute
 }
@@ -121,6 +128,7 @@ export interface FileRoutesByTo {
   '/persona': typeof AuthenticatedPersonaRoute
   '/api/start-call': typeof ApiStartCallRoute
   '/': typeof AuthenticatedIndexRoute
+  '/api/console/webhook-test': typeof ApiConsoleWebhookTestRoute
   '/api/public/call-logs': typeof ApiPublicCallLogsRoute
   '/api/public/jobs/llamadas': typeof ApiPublicJobsLlamadasRoute
 }
@@ -138,6 +146,7 @@ export interface FileRoutesById {
   '/_authenticated/persona': typeof AuthenticatedPersonaRoute
   '/api/start-call': typeof ApiStartCallRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/api/console/webhook-test': typeof ApiConsoleWebhookTestRoute
   '/api/public/call-logs': typeof ApiPublicCallLogsRoute
   '/api/public/jobs/llamadas': typeof ApiPublicJobsLlamadasRoute
 }
@@ -155,6 +164,7 @@ export interface FileRouteTypes {
     | '/perfil'
     | '/persona'
     | '/api/start-call'
+    | '/api/console/webhook-test'
     | '/api/public/call-logs'
     | '/api/public/jobs/llamadas'
   fileRoutesByTo: FileRoutesByTo
@@ -170,6 +180,7 @@ export interface FileRouteTypes {
     | '/persona'
     | '/api/start-call'
     | '/'
+    | '/api/console/webhook-test'
     | '/api/public/call-logs'
     | '/api/public/jobs/llamadas'
   id:
@@ -186,6 +197,7 @@ export interface FileRouteTypes {
     | '/_authenticated/persona'
     | '/api/start-call'
     | '/_authenticated/'
+    | '/api/console/webhook-test'
     | '/api/public/call-logs'
     | '/api/public/jobs/llamadas'
   fileRoutesById: FileRoutesById
@@ -197,6 +209,7 @@ export interface RootRouteChildren {
   ConsolaRoute: typeof ConsolaRoute
   RecomendarRoute: typeof RecomendarRoute
   ApiStartCallRoute: typeof ApiStartCallRoute
+  ApiConsoleWebhookTestRoute: typeof ApiConsoleWebhookTestRoute
   ApiPublicCallLogsRoute: typeof ApiPublicCallLogsRoute
   ApiPublicJobsLlamadasRoute: typeof ApiPublicJobsLlamadasRoute
 }
@@ -287,6 +300,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiStartCallRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/console/webhook-test': {
+      id: '/api/console/webhook-test'
+      path: '/api/console/webhook-test'
+      fullPath: '/api/console/webhook-test'
+      preLoaderRoute: typeof ApiConsoleWebhookTestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/call-logs': {
       id: '/api/public/call-logs'
       path: '/api/public/call-logs'
@@ -332,6 +352,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConsolaRoute: ConsolaRoute,
   RecomendarRoute: RecomendarRoute,
   ApiStartCallRoute: ApiStartCallRoute,
+  ApiConsoleWebhookTestRoute: ApiConsoleWebhookTestRoute,
   ApiPublicCallLogsRoute: ApiPublicCallLogsRoute,
   ApiPublicJobsLlamadasRoute: ApiPublicJobsLlamadasRoute,
 }

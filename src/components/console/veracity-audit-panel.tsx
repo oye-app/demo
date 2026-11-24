@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { CallLogRow } from "@/lib/call-logs";
 import { computeModelProvenanceBadge } from "@/lib/console";
+import { LivePipelineTester } from "@/components/console/live-pipeline-tester";
 
 export function VeracityAuditPanel({ logs }: { logs: CallLogRow[] }) {
   const qc = useQueryClient();
@@ -25,8 +26,11 @@ export function VeracityAuditPanel({ logs }: { logs: CallLogRow[] }) {
 
   if (!selected) {
     return (
-      <div className="rounded-3xl border bg-card p-6 text-xs text-muted-foreground">
-        Todavía no hay llamadas registradas para auditar.
+      <div className="space-y-4">
+        <div className="rounded-3xl border bg-card p-6 text-xs text-muted-foreground">
+          Todavía no hay llamadas registradas para auditar.
+        </div>
+        <LivePipelineTester />
       </div>
     );
   }
@@ -268,6 +272,8 @@ export function VeracityAuditPanel({ logs }: { logs: CallLogRow[] }) {
           </div>
         </div>
       </div>
+
+      <LivePipelineTester seniorName={selected.nombre || "Carmen"} />
     </div>
   );
 }

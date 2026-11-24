@@ -85,9 +85,14 @@ export type SituationReport = {
         riqueza_lexica_pct: number;
         latencia_respuesta_seg: number | null;
         comparativa_previa?: string;
+        baseline_riqueza_pct?: number | null;
+        baseline_palabras_resp?: number | null;
+        deriva_vocal_detectada?: boolean;
       };
     };
   };
+  motivos_clinicos?: string[];
+  recuerdo_biografico_nuevo?: string | null;
   prescripcion_y_derivacion_humana?: {
     activar_protocolo_voy_yo: boolean;
     anillo_derivacion_recomendado:

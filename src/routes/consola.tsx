@@ -48,6 +48,7 @@ import { DossierTimelinePanel } from "@/components/console/dossier-timeline";
 import { DailyAgendaPanel } from "@/components/console/daily-agenda-panel";
 import { FhirViewerCard } from "@/components/console/fhir-viewer-card";
 import { VeracityAuditPanel } from "@/components/console/veracity-audit-panel";
+import { RiskRadarCard } from "@/components/console/risk-radar-card";
 import { meQuery } from "@/lib/auth";
 import { demoAccess } from "@/lib/demo.functions";
 import { useAllCallLogs } from "@/lib/call-logs";
@@ -57,6 +58,7 @@ import {
   buildConsoleCsvExport,
   classifyUrgencyTier,
   computeDistrictCoverage,
+  computePredictiveRiskRadar,
   computeSlaStatus,
   computeTodayScheduleCoverage,
   useCommunityResources,
@@ -66,6 +68,7 @@ import {
   useConsoleRealtimeSync,
   useConsoleVolunteers,
   useIsConsoleOperator,
+  useSeniorDossier,
   type ConsoleCensusRow,
   type ConsoleVolunteerRow,
   type UrgencyTier,
@@ -883,12 +886,18 @@ function SeniorCommandDetail({
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { data: logs = [] } = useAllCallLogs(senior.senior_id);
+  const { data: dossier } = useSeniorDossier(senior.senior_id);
   const [detailTab, setDetailTab] = useState<DetailTab>("resumen");
   const [editOpen, setEditOpen] = useState(false);
   const [pausing, setPausing] = useState(false);
 
   const latestLog = logs[0] ?? null;
   const sla = computeSlaStatus(senior.active_alert_created_at, senior.active_alert_mood);
+  const riskRadar = computePredictiveRiskRadar({
+    senior,
+    logs,
+    interventions: dossier?.interventions ?? [],
+  });
 
   async function toggleSchedulePause() {
     setPausing(true);
@@ -1072,6 +1081,21 @@ function SeniorCommandDetail({
 
       {detailTab === "resumen" ? (
         <div className="space-y-4">
+          <div className="print:hidden">
+            <RiskRadarCard
+              radar={riskRadar}
+              seniorName={senior.name}
+              onAction={(actionType) => {
+                if (actionType === "call_now") {
+                  void navigate({ to: "/llamada", search: { sid: senior.senior_id } });
+                } else if (actionType === "open_dossier") {
+                  setDetailTab("bitacora");
+                } else {
+                  toast.info("Usa el panel de Despacho superior para asignar o coordinar el voluntario cercano.");
+                }
+              }}
+            />
+          </div>
           <div className="print:hidden">
             <DispatchPanel senior={senior} volunteers={volunteers} />
           </div>

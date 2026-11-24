@@ -405,6 +405,16 @@ function analyzeSpanishConversation(params: {
     lonelinessQuote = extractedQuotes[0];
   }
 
+  if (typeof rawAiReport?.soledad_ucla_puntos === "number" && Number.isFinite(rawAiReport.soledad_ucla_puntos)) {
+    uclaScore3to9 = Math.max(3, Math.min(9, Math.round(rawAiReport.soledad_ucla_puntos)));
+    const verifiedSocialEv = verifyQuotesAgainstTranscript(
+      rawAiReport.soledad_evidencia ? [rawAiReport.soledad_evidencia] : [],
+      userFullText,
+      [lonelinessQuote]
+    );
+    lonelinessQuote = verifiedSocialEv[0] || lonelinessQuote;
+  }
+
   // 7. Analyze Mood & Spirits (Yesavage GDS-5: 0 to 5)
   let gdsScore = 0;
   let moodQuote = "";
@@ -431,6 +441,17 @@ function analyzeSpanishConversation(params: {
   } else {
     gdsScore = 1;
     moodQuote = extractedQuotes[0];
+  }
+
+  if (typeof rawAiReport?.animo_yesavage_puntos === "number" && Number.isFinite(rawAiReport.animo_yesavage_puntos)) {
+    const aiGds = Math.max(0, Math.min(5, Math.round(rawAiReport.animo_yesavage_puntos)));
+    gdsScore = severeMoodMatch ? Math.max(gdsScore, aiGds) : aiGds;
+    const verifiedMoodEv = verifyQuotesAgainstTranscript(
+      rawAiReport.animo_evidencia ? [rawAiReport.animo_evidencia] : [],
+      userFullText,
+      [moodQuote]
+    );
+    moodQuote = verifiedMoodEv[0] || moodQuote;
   }
 
   // 8. Calculate Self-Care Score (0 to 3)
@@ -517,17 +538,38 @@ function analyzeSpanishConversation(params: {
       ? Math.round((responseLatencies.reduce((a, b) => a + b, 0) / responseLatencies.length) * 10) / 10
       : null;
 
-  const prevLex = priorCalls[0]?.lexPct ?? null;
+  const priorLexValues = priorCalls.map((c) => c.lexPct).filter((v): v is number => typeof v === "number");
+  const priorWordsValues = priorCalls.map((c) => c.avgWords).filter((v): v is number => typeof v === "number");
+  const baselineLexAvg =
+    priorLexValues.length > 0
+      ? Math.round(priorLexValues.reduce((a, b) => a + b, 0) / priorLexValues.length)
+      : null;
+  const baselineWordsAvg =
+    priorWordsValues.length > 0
+      ? Math.round((priorWordsValues.reduce((a, b) => a + b, 0) / priorWordsValues.length) * 10) / 10
+      : null;
+  const deltaLexFromBaseline = baselineLexAvg !== null ? riquezaLexicaPct - baselineLexAvg : null;
+  const deltaWordsPctFromBaseline =
+    baselineWordsAvg && baselineWordsAvg > 0
+      ? Math.round(((avgWordsPerTurn - baselineWordsAvg) / baselineWordsAvg) * 100)
+      : null;
+  const vocalDriftDetected =
+    (deltaLexFromBaseline !== null && deltaLexFromBaseline <= -12) ||
+    (deltaWordsPctFromBaseline !== null && deltaWordsPctFromBaseline <= -35);
+
   const lexComparativa =
-    prevLex !== null
-      ? riquezaLexicaPct - prevLex <= -12
-        ? `Riqueza léxica desciende ${Math.abs(riquezaLexicaPct - prevLex)} pts respecto a la llamada previa.`
-        : `Fluidez verbal consistente con la llamada anterior (${prevLex}% → ${riquezaLexicaPct}% riqueza léxica).`
+    baselineLexAvg !== null
+      ? vocalDriftDetected
+        ? `Desvío vocal detectado vs línea base personal (${baselineLexAvg}% → ${riquezaLexicaPct}% riqueza léxica; ${baselineWordsAvg ?? "?"} → ${avgWordsPerTurn} pal/resp).`
+        : `Fluidez vocal consistente con su línea base personal (${baselineLexAvg}% → ${riquezaLexicaPct}% riqueza léxica).`
       : "Línea base vocal registrada para seguimiento longitudinal.";
 
+  const aiVocalState = rawAiReport?.estado_vocal_cognitivo;
   const vocalState: "FLUIDO_ORIENTADO" | "LENTITUD_MONOSILABOS" | "DESORIENTACION_CONFUSION" =
     /no s[eé] d[oó]nde estoy|no me acuerdo de nada|confundid[ao]/i.test(userLower)
       ? "DESORIENTACION_CONFUSION"
+      : aiVocalState && ["FLUIDO_ORIENTADO", "LENTITUD_MONOSILABOS", "DESORIENTACION_CONFUSION"].includes(aiVocalState)
+      ? aiVocalState
       : userTurns.length <= 2 && userWordCount < 10
       ? "LENTITUD_MONOSILABOS"
       : "FLUIDO_ORIENTADO";
@@ -875,9 +917,17 @@ function analyzeSpanishConversation(params: {
           riqueza_lexica_pct: riquezaLexicaPct,
           latencia_respuesta_seg: latenciaRespuestaSeg,
           comparativa_previa: lexComparativa,
+          baseline_riqueza_pct: baselineLexAvg,
+          baseline_palabras_resp: baselineWordsAvg,
+          deriva_vocal_detectada: vocalDriftDetected,
         },
       },
     },
+    motivos_clinicos: Array.isArray(rawAiReport?.motivos_clinicos) ? rawAiReport.motivos_clinicos : [],
+    recuerdo_biografico_nuevo:
+      typeof rawAiReport?.recuerdo_biografico_nuevo === "string" && rawAiReport.recuerdo_biografico_nuevo.trim().length > 5
+        ? rawAiReport.recuerdo_biografico_nuevo.trim()
+        : null,
     prescripcion_y_derivacion_humana: {
       activar_protocolo_voy_yo,
       anillo_derivacion_recomendado:
@@ -1141,7 +1191,7 @@ Deno.serve(async (req: Request) => {
             {
               role: "system",
               content:
-                "Analiza fielmente la transcripción real en español entre OYE (AGENT) y la persona mayor (USER). REGLA DE VERACIDAD ESTRICTA: Nunca inventes datos ni citas. Toda cita en `citas_textuales` debe copiar fragmentos EXACTOS dichos por USER. Evalúa negaciones y contexto real (ej. 'dormí bien aunque un poco cansada' NO es insomnio). Si hay historial previo, en `oye_recuerda_insight` compara explícitamente cómo evolucionó. Devuelve JSON con: nivel_alerta ('VERDE'|'AMARILLO'|'ROJO'), adherencia_medicacion ('CONFIRMADA'|'DUDOSA'|'NO_TOMADA'|'NO_MENCIONADA'), sueno_descanso ('CORRECTO'|'INSOMNIO_FATIGA'|'ALERTA'|'NO_MENCIONADO'), alimentacion_hidratacion ('CORRECTO'|'DESCUIDO'|'ALERTA'|'NO_MENCIONADO'), home_headline, call_title, summary, oye_recuerda_insight, diagnostico_situacion_ejecutivo, citas_textuales (array de frases exactas de USER), recomendacion_familiar, activar_protocolo_voy_yo.",
+                "Analiza fielmente la transcripción real en español entre OYE (AGENT) y la persona mayor (USER). REGLA DE VERACIDAD ESTRICTA: Nunca inventes datos, citas ni recuerdos biográficos; si USER no compartió un recuerdo biográfico concreto, pon `recuerdo_biografico_nuevo: null`. Toda cita en `citas_textuales`, `soledad_evidencia` y `animo_evidencia` debe copiar fragmentos EXACTOS dichos por USER. Evalúa negaciones y contexto real (ej. 'dormí bien aunque un poco cansada' NO es insomnio). Si hay historial previo, en `oye_recuerda_insight` compara explícitamente su evolución. Devuelve JSON con: nivel_alerta ('VERDE'|'AMARILLO'|'ROJO'), adherencia_medicacion ('CONFIRMADA'|'DUDOSA'|'NO_TOMADA'|'NO_MENCIONADA'), sueno_descanso ('CORRECTO'|'INSOMNIO_FATIGA'|'ALERTA'|'NO_MENCIONADO'), alimentacion_hidratacion ('CORRECTO'|'DESCUIDO'|'ALERTA'|'NO_MENCIONADO'), soledad_ucla_puntos (entero 3..9, donde 3=sin soledad y >=6=soledad moderada/alta aunque sea implícita), soledad_evidencia, animo_yesavage_puntos (entero 0..5, donde 0=bien y >=2=bajón anímico real), animo_evidencia, estado_vocal_cognitivo ('FLUIDO_ORIENTADO'|'LENTITUD_MONOSILABOS'|'DESORIENTACION_CONFUSION'), motivos_clinicos (array de slugs reales entre ['dolor','sueno','medicacion','soledad','animo','desorientacion','caida','nutricion','social_positivo']), recuerdo_biografico_nuevo (string|null), home_headline, call_title, summary, oye_recuerda_insight, diagnostico_situacion_ejecutivo, citas_textuales (array de frases exactas de USER), recomendacion_familiar, activar_protocolo_voy_yo.",
             },
             {
               role: "user",

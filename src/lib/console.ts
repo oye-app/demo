@@ -871,6 +871,8 @@ export type LifeStoryItem = {
   quote: string;
   insight: string;
   alertLevel: string;
+  memoryHighlight: string | null;
+  motivosClinicos: string[];
 };
 
 export function extractLifeStoryQuotes(logs: CallLogRow[]): LifeStoryItem[] {
@@ -882,7 +884,14 @@ export function extractLifeStoryQuotes(logs: CallLogRow[]): LifeStoryItem[] {
 
   for (const log of sorted) {
     const quotes = log.report?.citas_textuales ?? [];
-    const quote = quotes.find((q) => typeof q === "string" && q.trim().length > 4)?.trim();
+    const memoryHighlight =
+      typeof log.report?.recuerdo_biografico_nuevo === "string" &&
+      log.report.recuerdo_biografico_nuevo.trim().length > 4
+        ? log.report.recuerdo_biografico_nuevo.trim()
+        : null;
+    const rawMotivos = Array.isArray(log.report?.motivos_clinicos) ? log.report.motivos_clinicos : [];
+    const motivosClinicos = rawMotivos.filter((m): m is string => typeof m === "string");
+    const quote = quotes.find((q) => typeof q === "string" && q.trim().length > 4)?.trim() || memoryHighlight;
     if (!quote) continue;
     const norm = quote.toLowerCase();
     if (seen.has(norm)) continue;
@@ -897,10 +906,544 @@ export function extractLifeStoryQuotes(logs: CallLogRow[]): LifeStoryItem[] {
       quote,
       insight: log.report?.oye_recuerda_insight || log.report?.summary || "",
       alertLevel: log.report?.nivel_alerta || log.nivel_alerta || "VERDE",
+      memoryHighlight,
+      motivosClinicos,
     });
   }
 
   return items;
+}
+
+export type PersonalVocalBaseline = {
+  sampleCount: number;
+  latestLexicalPct: number | null;
+  baselineLexicalPct: number | null;
+  deltaLexicalPct: number | null;
+  latestWordsPerTurn: number | null;
+  baselineWordsPerTurn: number | null;
+  deltaWordsPct: number | null;
+  latestLatencySec: number | null;
+  baselineLatencySec: number | null;
+  driftDetected: boolean;
+  statusLabel: "estable" | "desvio_detectado" | "linea_base_inicial" | "sin_datos";
+};
+
+/**
+ * Computes longitudinal vocal & lexical biomarkers from completed calls against
+ * each senior's own prior baseline (never inventing values for legacy null rows).
+ */
+export function computePersonalVocalBaseline(logs: CallLogRow[]): PersonalVocalBaseline {
+  const withBio = [...logs]
+    .filter((l) => l.status === "completada")
+    .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+    .flatMap((l) => {
+      const bio = l.report?.evaluacion_escalas?.indicadores_vocales_cognitivos?.biomarcadores;
+      if (!bio || typeof bio.riqueza_lexica_pct !== "number") return [];
+      return [{ log: l, bio }];
+    });
+
+  if (withBio.length === 0) {
+    return {
+      sampleCount: 0,
+      latestLexicalPct: null,
+      baselineLexicalPct: null,
+      deltaLexicalPct: null,
+      latestWordsPerTurn: null,
+      baselineWordsPerTurn: null,
+      deltaWordsPct: null,
+      latestLatencySec: null,
+      baselineLatencySec: null,
+      driftDetected: false,
+      statusLabel: "sin_datos",
+    };
+  }
+
+  const latest = withBio[withBio.length - 1]!;
+  const prior = withBio.slice(0, -1);
+
+  const latestLexicalPct = Math.round(latest.bio.riqueza_lexica_pct);
+  const latestWordsPerTurn =
+    typeof latest.bio.palabras_por_respuesta === "number"
+      ? Math.round(latest.bio.palabras_por_respuesta * 10) / 10
+      : null;
+  const latestLatencySec =
+    typeof latest.bio.latencia_respuesta_seg === "number"
+      ? Math.round(latest.bio.latencia_respuesta_seg * 10) / 10
+      : null;
+
+  if (prior.length === 0) {
+    return {
+      sampleCount: 1,
+      latestLexicalPct,
+      baselineLexicalPct: latestLexicalPct,
+      deltaLexicalPct: 0,
+      latestWordsPerTurn,
+      baselineWordsPerTurn: latestWordsPerTurn,
+      deltaWordsPct: 0,
+      latestLatencySec,
+      baselineLatencySec: latestLatencySec,
+      driftDetected: false,
+      statusLabel: "linea_base_inicial",
+    };
+  }
+
+  const baselineLexicalPct = Math.round(
+    prior.reduce((sum, x) => sum + x.bio.riqueza_lexica_pct, 0) / prior.length
+  );
+  const priorWords = prior
+    .map((x) => x.bio.palabras_por_respuesta)
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+  const baselineWordsPerTurn =
+    priorWords.length > 0
+      ? Math.round((priorWords.reduce((s, n) => s + n, 0) / priorWords.length) * 10) / 10
+      : null;
+  const priorLatencies = prior
+    .map((x) => x.bio.latencia_respuesta_seg)
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+  const baselineLatencySec =
+    priorLatencies.length > 0
+      ? Math.round((priorLatencies.reduce((s, n) => s + n, 0) / priorLatencies.length) * 10) / 10
+      : null;
+
+  const deltaLexicalPct = latestLexicalPct - baselineLexicalPct;
+  const deltaWordsPct =
+    baselineWordsPerTurn && baselineWordsPerTurn > 0 && latestWordsPerTurn !== null
+      ? Math.round(((latestWordsPerTurn - baselineWordsPerTurn) / baselineWordsPerTurn) * 100)
+      : null;
+
+  const driftDetected =
+    Boolean(latest.bio.deriva_vocal_detectada) ||
+    deltaLexicalPct <= -12 ||
+    (deltaWordsPct !== null && deltaWordsPct <= -35);
+
+  return {
+    sampleCount: withBio.length,
+    latestLexicalPct,
+    baselineLexicalPct,
+    deltaLexicalPct,
+    latestWordsPerTurn,
+    baselineWordsPerTurn,
+    deltaWordsPct,
+    latestLatencySec,
+    baselineLatencySec,
+    driftDetected,
+    statusLabel: driftDetected ? "desvio_detectado" : "estable",
+  };
+}
+
+export type RiskDriver = {
+  id: string;
+  label: string;
+  detail: string;
+  points: number;
+  severity: "high" | "medium" | "info";
+};
+
+export type RiskAction = {
+  id: string;
+  label: string;
+  rationale: string;
+  actionType: "call_now" | "assign_volunteer" | "open_dossier";
+};
+
+export type PredictiveRiskRadar = {
+  score: number;
+  tier: "CRITICO" | "ELEVADO" | "VIGILANCIA" | "ESTABLE";
+  drivers: RiskDriver[];
+  nextBestActions: RiskAction[];
+  dataCompletenessPct: number;
+  vocalBaseline: PersonalVocalBaseline;
+};
+
+/**
+ * Computes an explainable 0–100 Risk Radar strictly from Supabase clinical history,
+ * triage state, scale scores, vocal baseline drift and intervention gaps.
+ */
+export function computePredictiveRiskRadar(params: {
+  senior: ConsoleCensusRow;
+  logs: CallLogRow[];
+  interventions?: { created_at: string }[];
+  now?: Date;
+}): PredictiveRiskRadar {
+  const { senior, logs, interventions = [], now = new Date() } = params;
+  const series = buildClinicalChartSeries(logs, 14);
+  const vocalBaseline = computePersonalVocalBaseline(logs);
+  const completedLogs = [...logs]
+    .filter((l) => l.status === "completada")
+    .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  const latestLog = completedLogs[0] ?? null;
+  const recentThree = completedLogs.slice(0, 3);
+
+  const drivers: RiskDriver[] = [];
+  let rawScore = 0;
+
+  // 1. Longitudinal wellbeing trajectory vs personal baseline
+  if (series.deltaFromBaseline !== null && series.deltaFromBaseline <= -20) {
+    const pts = 28;
+    rawScore += pts;
+    drivers.push({
+      id: "wellbeing_drop",
+      label: `Caída fuerte de bienestar (${series.deltaFromBaseline} pts vs base)`,
+      detail: `Pasó de su media base (${series.baselineAvgPct}%) a ${series.latestPct}%.`,
+      points: pts,
+      severity: "high",
+    });
+  } else if (series.deltaFromBaseline !== null && series.deltaFromBaseline <= -10) {
+    const pts = 18;
+    rawScore += pts;
+    drivers.push({
+      id: "wellbeing_drop",
+      label: `Descenso frente a línea base (${series.deltaFromBaseline} pts)`,
+      detail: `Referencia histórica ${series.baselineAvgPct}% → última llamada ${series.latestPct}%.`,
+      points: pts,
+      severity: "medium",
+    });
+  } else if (series.latestPct !== null && series.latestPct < 60) {
+    const pts = 16;
+    rawScore += pts;
+    drivers.push({
+      id: "low_wellbeing",
+      label: `Bienestar global bajo (${series.latestPct}%)`,
+      detail: "Último índice registrado por debajo del umbral óptimo (60%).",
+      points: pts,
+      severity: "medium",
+    });
+  }
+
+  // 2. Current alert level & active alerts
+  if (senior.latest_nivel_alerta === "ROJO") {
+    const pts = 30;
+    rawScore += pts;
+    drivers.push({
+      id: "triage_red",
+      label: "Estado actual en Alerta ROJA",
+      detail: senior.active_alert_id ? "Alerta activa pendiente de cierre." : "Prioridad máxima de triaje.",
+      points: pts,
+      severity: "high",
+    });
+  } else if (senior.latest_nivel_alerta === "AMARILLO" || Boolean(senior.active_alert_id)) {
+    const pts = 14;
+    rawScore += pts;
+    drivers.push({
+      id: "triage_yellow",
+      label: senior.latest_nivel_alerta === "AMARILLO" ? "Triaje en seguimiento AMARILLO" : "Alerta operativa abierta",
+      detail: senior.latest_headline || "Alerta activa en cola de coordinación.",
+      points: pts,
+      severity: "medium",
+    });
+  }
+
+  // 3. Psychometric loneliness & mood scales (UCLA-3 / GDS-5)
+  const ucla = senior.latest_ucla_score;
+  const gds = senior.latest_yesavage_score;
+  if ((ucla !== null && ucla >= 7) || (gds !== null && gds >= 4)) {
+    const pts = 20;
+    rawScore += pts;
+    drivers.push({
+      id: "scales_high",
+      label: "Sobrecarga emocional / soledad elevada",
+      detail: `UCLA-3: ${ucla ?? "—"}/9 · Yesavage GDS-5: ${gds ?? "—"}/5.`,
+      points: pts,
+      severity: "high",
+    });
+  } else if ((ucla !== null && ucla >= 6) || (gds !== null && gds >= 2)) {
+    const pts = 12;
+    rawScore += pts;
+    drivers.push({
+      id: "scales_mod",
+      label: ucla !== null && ucla >= 6 ? `Riesgo de soledad (UCLA-3 ${ucla}/9)` : `Ánimo sensible (GDS-5 ${gds}/5)`,
+      detail: "Señal preventiva para acompañamiento humano o prescripción social.",
+      points: pts,
+      severity: "medium",
+    });
+  }
+
+  // 4. Personal vocal & cognitive drift
+  const vocalState = latestLog?.report?.evaluacion_escalas?.indicadores_vocales_cognitivos?.estado ?? null;
+  if (vocalState === "DESORIENTACION_CONFUSION") {
+    const pts = 18;
+    rawScore += pts;
+    drivers.push({
+      id: "vocal_disorientation",
+      label: "Indicio cognitivo de desorientación",
+      detail: "Detectado en indicadores vocales y coherencia del discurso.",
+      points: pts,
+      severity: "high",
+    });
+  } else if (vocalBaseline.driftDetected) {
+    const pts = 15;
+    rawScore += pts;
+    drivers.push({
+      id: "vocal_drift",
+      label: "Desvío frente a su línea base vocal",
+      detail: `Riqueza léxica ${vocalBaseline.baselineLexicalPct}% → ${vocalBaseline.latestLexicalPct}% (${vocalBaseline.deltaLexicalPct ?? 0} pts).`,
+      points: pts,
+      severity: "high",
+    });
+  } else if (vocalState === "LENTITUD_MONOSILABOS") {
+    const pts = 8;
+    rawScore += pts;
+    drivers.push({
+      id: "vocal_brief",
+      label: "Respuestas breves o menor fluidez",
+      detail: "Recomendable validar descanso o fatiga en siguiente contacto.",
+      points: pts,
+      severity: "medium",
+    });
+  }
+
+  // 5. Adherence & daily self-care across last 3 completed calls
+  let pendingMedCount = 0;
+  let sleepFoodIssueCount = 0;
+  for (const log of recentThree) {
+    const auto = log.report?.evaluacion_escalas?.autocuidado_y_salud;
+    if (!auto) continue;
+    if (auto.adherencia_medicacion === "NO_TOMADA" || auto.adherencia_medicacion === "DUDOSA") {
+      pendingMedCount += 1;
+    }
+    if (
+      auto.sueno_descanso === "ALERTA" ||
+      auto.sueno_descanso === "INSOMNIO_FATIGA" ||
+      auto.alimentacion_hidratacion === "ALERTA" ||
+      auto.alimentacion_hidratacion === "DESCUIDO"
+    ) {
+      sleepFoodIssueCount += 1;
+    }
+  }
+  if (pendingMedCount > 0 || sleepFoodIssueCount >= 2) {
+    const pts = pendingMedCount >= 2 ? 14 : 9;
+    rawScore += pts;
+    drivers.push({
+      id: "selfcare",
+      label: pendingMedCount > 0 ? "Incidencia reciente en medicación" : "Irregularidad reiterada en sueño/nutrición",
+      detail:
+        pendingMedCount > 0
+          ? `Adherencia dudosa o pendiente en ${pendingMedCount} de las últimas ${recentThree.length} llamadas.`
+          : `Descuido o descanso irregular observado en ${sleepFoodIssueCount} llamadas recientes.`,
+      points: pts,
+      severity: pendingMedCount >= 2 ? "high" : "medium",
+    });
+  }
+
+  // 6. Contact continuity & recent human follow-up mitigation
+  const newestFirstLogs = [...logs].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  let consecutiveNoAnswer = 0;
+  for (const l of newestFirstLogs) {
+    if (l.status === "no_contesta") consecutiveNoAnswer += 1;
+    else break;
+  }
+  if (consecutiveNoAnswer === 0 && senior.latest_call_status === "no_contesta") {
+    consecutiveNoAnswer = 1;
+  }
+
+  const lastCallMs = senior.latest_call_at ? +new Date(senior.latest_call_at) : null;
+  const hoursSinceCall = lastCallMs && !Number.isNaN(lastCallMs) ? (now.getTime() - lastCallMs) / 3_600_000 : null;
+  if (consecutiveNoAnswer >= 1 || senior.latest_call_status === "no_contesta") {
+    const pts = consecutiveNoAnswer >= 2 ? 16 : 10;
+    rawScore += pts;
+    drivers.push({
+      id: "unanswered",
+      label: `Sin respuesta reciente (${consecutiveNoAnswer || 1} intento)`,
+      detail: "Requiere rellamada de verificación o contacto con persona con llave.",
+      points: pts,
+      severity: consecutiveNoAnswer >= 2 ? "high" : "medium",
+    });
+  } else if (senior.schedule_active && hoursSinceCall !== null && hoursSinceCall > 36) {
+    const pts = 8;
+    rawScore += pts;
+    drivers.push({
+      id: "overdue_contact",
+      label: `Más de ${Math.floor(hoursSinceCall)} h sin llamada completada`,
+      detail: "Agenda diaria activa con brecha superior a 36 horas.",
+      points: pts,
+      severity: "medium",
+    });
+  }
+
+  const recentHumanTouch = interventions.some((i) => {
+    const ageH = (now.getTime() - +new Date(i.created_at)) / 3_600_000;
+    return !Number.isNaN(ageH) && ageH <= 24;
+  });
+  if (recentHumanTouch && rawScore > 0) {
+    rawScore = Math.max(0, rawScore - 6);
+    drivers.push({
+      id: "human_mitigation",
+      label: "Seguimiento humano reciente registrado (<24h)",
+      detail: "Reduce riesgo operativo (-6 pts) al existir intervención en curso.",
+      points: -6,
+      severity: "info",
+    });
+  }
+
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+  const tier: PredictiveRiskRadar["tier"] =
+    score >= 70 ? "CRITICO" : score >= 45 ? "ELEVADO" : score >= 22 ? "VIGILANCIA" : "ESTABLE";
+
+  if (drivers.length === 0) {
+    drivers.push({
+      id: "stable_protective",
+      label: "Sin factores de riesgo activos en el historial",
+      detail:
+        vocalBaseline.sampleCount >= 2
+          ? `Línea base vocal consistente (${vocalBaseline.latestLexicalPct}% riqueza léxica) y rutinas estables.`
+          : "Última evaluación en parámetros habituales sin alertas ni brechas de contacto.",
+      points: 0,
+      severity: "info",
+    });
+  } else {
+    drivers.sort((a, b) => Math.abs(b.points) - Math.abs(a.points));
+  }
+
+  // Build prioritized 1-click Next Best Actions
+  const nextBestActions: RiskAction[] = [];
+  if (
+    senior.latest_nivel_alerta === "ROJO" ||
+    consecutiveNoAnswer >= 1 ||
+    senior.latest_call_status === "no_contesta" ||
+    senior.latest_call_status === "urgencia_en_curso"
+  ) {
+    nextBestActions.push({
+      id: "nba_call",
+      label: "Lanzar llamada OYE ahora",
+      rationale: "Verificar estado en tiempo real tras alerta o intento sin respuesta.",
+      actionType: "call_now",
+    });
+  }
+  if ((ucla !== null && ucla >= 6) || !senior.active_alert_volunteer_name) {
+    nextBestActions.push({
+      id: "nba_volunteer",
+      label: senior.active_alert_volunteer_name
+        ? `Coordinar con ${senior.active_alert_volunteer_name}`
+        : "Asignar voluntario cercano (Anillo 2)",
+      rationale:
+        ucla !== null && ucla >= 6
+          ? `Soledad UCLA-3 (${ucla}/9): requiere acompañamiento vecinal o llamada cálida.`
+          : "Sin voluntario asignado en alerta activa.",
+      actionType: "assign_volunteer",
+    });
+  }
+  nextBestActions.push({
+    id: "nba_dossier",
+    label: pendingMedCount > 0 ? "Verificar medicación y anotar dossier" : "Registrar intervención en dossier",
+    rationale:
+      pendingMedCount > 0
+        ? "Incidencia de adherencia terapéutica detectada en llamadas recientes."
+        : "Dejar trazabilidad clínica/social auditada en historial.",
+    actionType: "open_dossier",
+  });
+
+  // Compute transparent data completeness % across 6 verifiable domains
+  const checks = [
+    completedLogs.length > 0,
+    series.points.length >= 2,
+    ucla !== null && gds !== null,
+    vocalBaseline.sampleCount >= 1,
+    Boolean(latestLog?.report?.evaluacion_escalas?.autocuidado_y_salud),
+    Boolean(senior.meds || senior.key_contact_name),
+  ];
+  const dataCompletenessPct = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+
+  return {
+    score,
+    tier,
+    drivers,
+    nextBestActions: nextBestActions.slice(0, 3),
+    dataCompletenessPct,
+    vocalBaseline,
+  };
+}
+
+/**
+ * Signs JSON webhook payloads with HMAC-SHA256 using standard Web Crypto API (`sha256=<hex>`).
+ */
+export async function signPayloadHmacSha256(payloadText: string, secret: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sigBuf = await globalThis.crypto.subtle.sign("HMAC", key, enc.encode(payloadText));
+  const bytes = new Uint8Array(sigBuf);
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `sha256=${hex}`;
+}
+
+export function isPrivateOrReservedIp(ipRaw: string): boolean {
+  const ip = ipRaw.trim().toLowerCase().replace(/^\[|\]$/g, "").split("%")[0] ?? "";
+  if (!ip) return true;
+
+  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    const c = Number(v4[3]);
+    const d = Number(v4[4]);
+    if ([a, b, c, d].some((n) => n < 0 || n > 255)) return true;
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
+    if (a === 198 && (b === 18 || b === 19 || b === 51)) return true;
+    if (a === 203 && b === 0 && c === 113) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+
+  if (ip.includes(":")) {
+    if (ip === "::" || ip === "::1") return true;
+    if (ip.startsWith("fe80:") || ip.startsWith("fc") || ip.startsWith("fd") || ip.startsWith("ff")) return true;
+    if (ip.startsWith("::ffff:")) return true;
+    return false;
+  }
+
+  return false;
+}
+
+export function validateWebhookTargetUrl(rawUrl: string): { ok: true; url: URL } | { ok: false; reason: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    return { ok: false, reason: "URL inválida." };
+  }
+
+  if (parsed.protocol !== "https:") {
+    return { ok: false, reason: "Solo se permiten endpoints HTTPS externos." };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: "No se permiten credenciales incrustadas en la URL." };
+  }
+
+  const host = parsed.hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
+  if (!host) return { ok: false, reason: "Hostname vacío." };
+  if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) {
+    return { ok: false, reason: "Hostname numérico no permitido." };
+  }
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".arpa")
+  ) {
+    return { ok: false, reason: "Host local o interno bloqueado por seguridad SSRF." };
+  }
+  if (isPrivateOrReservedIp(host)) {
+    return { ok: false, reason: "IP privada o reservada bloqueada por seguridad SSRF." };
+  }
+  if (!host.includes(":")) {
+    const parts = host.split(".");
+    if (parts.length < 2 || parts.some((p) => p.length === 0)) {
+      return { ok: false, reason: "Se requiere un dominio público completo (FQDN)." };
+    }
+  }
+
+  return { ok: true, url: parsed };
 }
 
 export function buildFhirR4Bundle(row: ConsoleCensusRow) {
