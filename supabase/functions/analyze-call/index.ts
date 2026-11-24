@@ -13,6 +13,14 @@ interface Turn {
   text: string;
 }
 
+interface PriorCallSummary {
+  created_at: string;
+  nivel_alerta: string;
+  global_pct: number | null;
+  summary: string;
+  signals: string[];
+}
+
 function parseTranscriptTurns(rawTranscript: string, rawArray?: any[]): Turn[] {
   if (Array.isArray(rawArray) && rawArray.length > 0) {
     return rawArray
@@ -99,8 +107,9 @@ function analyzeSpanishConversation(params: {
   phone: string;
   durationSec: number;
   rawAiReport?: Record<string, any> | null;
+  priorCalls?: PriorCallSummary[];
 }) {
-  const { turns, rawTranscript, seniorName, phone, durationSec, rawAiReport } = params;
+  const { turns, rawTranscript, seniorName, phone, durationSec, rawAiReport, priorCalls = [] } = params;
   const firstName = seniorName.trim().split(/\s+/)[0] || "Carmen";
 
   const userTurns = turns.filter((t) => t.role === "user");
@@ -519,11 +528,39 @@ function analyzeSpanishConversation(params: {
           .join(" · ")
       : `En esta llamada (${durLabel}) no se detallaron explícitamente ${notMentionedItems.join(", ")}.`;
 
+  const latestPrior = priorCalls[0] ?? null;
+  const priorPct = latestPrior?.global_pct ?? null;
+  const deltaPct = priorPct !== null ? global_pct - priorPct : null;
+  const tendenciaTipo: "mejor" | "estable" | "descenso" | "nueva" =
+    deltaPct === null ? "nueva" : deltaPct >= 10 ? "mejor" : deltaPct <= -10 ? "descenso" : "estable";
+
+  let longitudinalComparison = "";
+  if (latestPrior) {
+    const prevPctStr = priorPct !== null ? `${priorPct}%` : latestPrior.nivel_alerta;
+    if (tendenciaTipo === "mejor") {
+      longitudinalComparison = `Mejoría frente a la llamada anterior (sube +${deltaPct} pts: de ${prevPctStr} a ${global_pct}% y nivel ${nivel_alerta}).`;
+    } else if (tendenciaTipo === "descenso") {
+      longitudinalComparison = `Descenso preventivo frente a la llamada anterior (baja ${deltaPct} pts: de ${prevPctStr} a ${global_pct}%, nivel ${nivel_alerta}).`;
+    } else {
+      longitudinalComparison = `Continuidad estable frente a la llamada anterior (${latestPrior.nivel_alerta} ${prevPctStr} → ${nivel_alerta} ${global_pct}%).`;
+    }
+  }
+
+  const baseInsight =
+    discussedDetails.length > 0
+      ? `En esta llamada (${durLabel}), ${firstName} ${discussedDetails.join(", ")}.`
+      : `Conversación de ${durLabel} (${userTurns.length} respuestas de ${firstName}): «${extractedQuotes[0]}».`;
+
   const oye_recuerda_insight =
     rawAiReport?.oye_recuerda_insight ||
-    (discussedDetails.length > 0
-      ? `En esta llamada (${durLabel}), ${firstName} ${discussedDetails.join(", ")}.`
-      : `Conversación de ${durLabel} (${userTurns.length} respuestas de ${firstName}): «${extractedQuotes[0]}».`);
+    (longitudinalComparison ? `${longitudinalComparison} ${baseInsight}` : baseInsight);
+
+  const tendencia_longitudinal = {
+    tendencia: tendenciaTipo,
+    delta_pct: deltaPct,
+    llamadas_comparadas: priorCalls.length,
+    resumen_comparativo: longitudinalComparison || "Primera llamada evaluada en el historial longitudinal.",
+  };
 
   const diagnostico_situacion_ejecutivo =
     rawAiReport?.diagnostico_situacion_ejecutivo ||
@@ -671,6 +708,7 @@ function analyzeSpanishConversation(params: {
           ? "Llamada o visita cercana de la red familiar/vecinal y paseo acompañado por el barrio."
           : "Mantener seguimiento telefónico diario con OYE y actividades habituales.",
     },
+    tendencia_longitudinal,
   };
 }
 
@@ -801,6 +839,68 @@ Deno.serve(async (req: Request) => {
       `[analyze-call] senior=${seniorName} personId=${personId} convId=${conversationId} dur=${durationSec}s turns=${turns.length} userTurns=${turns.filter((t) => t.role === "user").length} rawSample=${JSON.stringify(rawTranscript.slice(0, 350))}`
     );
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const resolvedPersonId =
+      !personId || personId === "demo-carmen" || personId === "person_123"
+        ? "d0000000-0000-4000-8000-000000000001"
+        : personId;
+    const sb = supabaseUrl && serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : null;
+
+    // Fetch last 3 completed calls for longitudinal comparison
+    let priorCalls: PriorCallSummary[] = [];
+    if (sb && !personId.startsWith("test-only")) {
+      try {
+        const { data: histRows } = await sb
+          .from("call_logs")
+          .select("conversation_id, created_at, nivel_alerta, global_pct, motivo, report")
+          .eq("person_id", resolvedPersonId)
+          .eq("status", "completada")
+          .order("created_at", { ascending: false })
+          .limit(4);
+
+        if (Array.isArray(histRows)) {
+          priorCalls = histRows
+            .filter((r: any) => !conversationId || r.conversation_id !== conversationId)
+            .slice(0, 3)
+            .map((r: any) => {
+              const rep = (r.report ?? {}) as Record<string, any>;
+              const rawSig = Array.isArray(rep.senales_detectadas)
+                ? rep.senales_detectadas
+                : Array.isArray(rep.top_badges)
+                ? rep.top_badges
+                : [];
+              return {
+                created_at: String(r.created_at || ""),
+                nivel_alerta: String(r.nivel_alerta || rep.nivel_alerta || "VERDE"),
+                global_pct:
+                  typeof r.global_pct === "number"
+                    ? r.global_pct
+                    : typeof rep.global_pct === "number"
+                    ? rep.global_pct
+                    : null,
+                summary: String(rep.summary || r.motivo || "").slice(0, 220),
+                signals: rawSig.filter((s: unknown) => typeof s === "string").slice(0, 3),
+              };
+            });
+        }
+      } catch (histErr) {
+        console.warn("[analyze-call] History fetch warning:", histErr);
+      }
+    }
+
+    const priorHistoryContext =
+      priorCalls.length > 0
+        ? priorCalls
+            .map((c, idx) => {
+              const label = idx === 0 ? "Llamada inmediatamente anterior" : `Llamada previa -${idx + 1}`;
+              const pctStr = c.global_pct !== null ? `${c.global_pct}% bienestar` : "sin %";
+              const sigStr = c.signals.length > 0 ? ` · Señales: ${c.signals.join(", ")}` : "";
+              return `- ${label} (${c.nivel_alerta}, ${pctStr}): ${c.summary}${sigStr}`;
+            })
+            .join("\n")
+        : "No hay llamadas previas completadas registradas.";
+
     const openAiKey = Deno.env.get("OPENAI_API_KEY");
     let rawAiReport: Record<string, any> | null = null;
 
@@ -820,11 +920,11 @@ Deno.serve(async (req: Request) => {
             {
               role: "system",
               content:
-                "Analiza fielmente la transcripción real en español entre OYE (AGENT) y la persona mayor (USER). No inventes datos que no se hayan mencionado en la conversación. Devuelve JSON con nivel_alerta, home_headline, call_title, summary, oye_recuerda_insight, diagnostico_situacion_ejecutivo, citas_textuales (frases exactas de USER), recomendacion_familiar, activar_protocolo_voy_yo.",
+                "Analiza fielmente la transcripción real en español entre OYE (AGENT) y la persona mayor (USER). No inventes datos que no se hayan mencionado en la conversación ni en el historial previo. Si hay historial previo, en `oye_recuerda_insight` compara explícitamente cómo ha evolucionado respecto a las llamadas anteriores (p. ej. mejoría, persistencia o descenso de ánimo/síntomas). Devuelve JSON con nivel_alerta, home_headline, call_title, summary, oye_recuerda_insight, diagnostico_situacion_ejecutivo, citas_textuales (frases exactas de USER), recomendacion_familiar, activar_protocolo_voy_yo.",
             },
             {
               role: "user",
-              content: `Persona: ${seniorName}\nDuración: ${durationSec}s\nTranscripción:\n${cleanTranscript}`,
+              content: `Persona: ${seniorName}\nDuración: ${durationSec}s\n\nHistorial longitudinal (últimas llamadas completadas):\n${priorHistoryContext}\n\nTranscripción actual:\n${cleanTranscript}`,
             },
           ],
         }),
@@ -850,18 +950,12 @@ Deno.serve(async (req: Request) => {
       phone,
       durationSec,
       rawAiReport,
+      priorCalls,
     });
 
     // Directly persist the report into public.call_logs using SUPABASE_SERVICE_ROLE_KEY as an immediate guarantee
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (supabaseUrl && serviceRoleKey && !personId.startsWith("test-only")) {
+    if (sb && !personId.startsWith("test-only")) {
       try {
-        const sb = createClient(supabaseUrl, serviceRoleKey);
-        const resolvedPersonId =
-          !personId || personId === "demo-carmen" || personId === "person_123"
-            ? "d0000000-0000-4000-8000-000000000001"
-            : personId;
 
         let targetConvId = conversationId;
         if (!targetConvId) {

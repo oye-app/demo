@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
+import { buildLastCallMemory } from "@/lib/call-memory";
 
 const requestSchema = z.object({
   person_id: z.string().trim().min(1),
@@ -44,6 +45,18 @@ export const Route = createFileRoute("/api/start-call")({
 
         const relationship = link?.relation || "Familiar";
 
+        // Load latest completed call for longitudinal continuity ("OYE se acuerda")
+        const { data: lastCompleted } = await supabaseAdmin
+          .from("call_logs")
+          .select("nivel_alerta, global_pct, motivo, created_at, report")
+          .eq("person_id", personId)
+          .eq("status", "completada")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const { last_call_memory, last_alert_level } = buildLastCallMemory(lastCompleted);
+
         // Format phone to E.164 without spaces
         let rawPhone = (senior.phone || "").replace(/[^\d+]/g, "");
         if (!rawPhone) {
@@ -65,6 +78,8 @@ export const Route = createFileRoute("/api/start-call")({
           phone: rawPhone,
           age: senior.age ?? null,
           relationship,
+          last_call_memory,
+          last_alert_level,
         };
 
         const makeUrl =
@@ -76,7 +91,7 @@ export const Route = createFileRoute("/api/start-call")({
           await supabaseAdmin.from("call_logs").insert({
             conversation_id: fakeConvId,
             person_id: senior.id,
-            nombre: senior.name.split(" ")[0],
+            nombre: senior.name.split(" ")[0] || senior.name,
             telefono_usuario: rawPhone,
             status: "llamando",
           });

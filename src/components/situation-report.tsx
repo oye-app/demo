@@ -17,6 +17,9 @@ import {
 } from "lucide-react";
 import type { CallLogRow } from "@/lib/call-logs";
 import { STATUS_MESSAGES } from "@/lib/call-logs";
+import { LongitudinalTrendCard } from "./longitudinal-trend";
+import { B2BWebhookViewer } from "./b2b-webhook-viewer";
+import { B2BExecutivePanel } from "./b2b-meeting-panel";
 
 interface SituationReportProps {
   log: CallLogRow;
@@ -255,6 +258,9 @@ export function SituationReportCard({ log, showExecutiveOnly = false }: Situatio
         </div>
       )}
 
+      {/* Tailor-made B2B Executive Brief when B2B Meeting Mode is enabled */}
+      <B2BExecutivePanel log={log} />
+
       {/* 4-Pillar Sub-percentages Grid with Visual Bars */}
       <div className="grid grid-cols-4 gap-2 rounded-2xl bg-muted/60 p-3 text-center">
         {[
@@ -473,6 +479,12 @@ export function SituationReportCard({ log, showExecutiveOnly = false }: Situatio
           )}
         </div>
       )}
+
+      {/* Longitudinal Silent Deterioration Detector (last completed calls) */}
+      <LongitudinalTrendCard personId={log.person_id} currentLog={log} />
+
+      {/* Discrete B2B API / Webhook Payload Viewer */}
+      <B2BWebhookViewer log={log} />
     </article>
   );
 }

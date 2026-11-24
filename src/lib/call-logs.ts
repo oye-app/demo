@@ -14,6 +14,7 @@ export type CallLogStatus =
   | "error";
 
 export type SituationReport = {
+  schema_version?: string;
   telefono_usuario?: string;
   timestamp_evaluacion?: string;
   nivel_alerta: NivelAlerta;
@@ -74,6 +75,12 @@ export type SituationReport = {
       | string;
     mensaje_sms_alerta: string;
     prescripcion_social_barrio: string;
+  };
+  tendencia_longitudinal?: {
+    tendencia: "mejor" | "estable" | "descenso" | "nueva";
+    delta_pct: number | null;
+    llamadas_comparadas: number;
+    resumen_comparativo: string;
   };
 };
 

@@ -32,6 +32,7 @@ import { personRequestSchema } from "@/lib/person-request";
 import { addPerson } from "@/lib/person.functions";
 import { useAllCallLogs, useLatestCallLog } from "@/lib/call-logs";
 import { SituationReportCard } from "@/components/situation-report";
+import { B2BModeSelector } from "@/components/b2b-meeting-panel";
 
 export const Route = createFileRoute("/_authenticated/")({
   validateSearch: personSearch,
@@ -508,6 +509,9 @@ function FamilyHome({ senior, relation }: { senior: string; relation: string }) 
       {/* Primary CTA at top for immediate access */}
       <CallCta label={`Llamar a ${senior} ahora`} />
 
+      {/* Discreet B2B Meeting View Switcher (off by default for clean family UX) */}
+      <B2BModeSelector />
+
       {/* Render full SituationReportCard when a call log is available */}
       {latestLog ? (
         <div className="space-y-2">
@@ -610,6 +614,10 @@ function NgoHome() {
             <Settings2 className="size-5" />
           </Link>
         </div>
+      </div>
+
+      <div className="pt-2">
+        <B2BModeSelector />
       </div>
 
       <div className="grid grid-cols-3 gap-2 pt-2">

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { buildLastCallMemory } from "./call-memory";
 
 const inputSchema = z.object({
   seniorId: z.string().uuid(),
@@ -83,6 +84,18 @@ export const startCall = createServerFn({ method: "POST" })
 
     const relationship = link?.relation?.trim() || "Familiar";
 
+    // 3b. Fetch latest completed call for longitudinal continuity ("OYE se acuerda")
+    const { data: lastCompleted } = await context.supabase
+      .from("call_logs")
+      .select("nivel_alerta, global_pct, motivo, created_at, report")
+      .eq("person_id", personId)
+      .eq("status", "completada")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const { last_call_memory, last_alert_level } = buildLastCallMemory(lastCompleted);
+
     // 4. Format phone strictly to E.164 without spaces (defaulting to verified +34678617031 if empty)
     let rawPhone = (senior.phone || "+34678617031").replace(/[^\d+]/g, "");
     if (!rawPhone) {
@@ -113,6 +126,8 @@ export const startCall = createServerFn({ method: "POST" })
         phone: targetPhone,
         age: senior.age ?? 84,
         relationship,
+        last_call_memory,
+        last_alert_level,
       };
       return fetch(makeWebhookUrl, {
         method: "POST",
