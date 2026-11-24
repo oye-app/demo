@@ -569,6 +569,22 @@ export function SituationReportCard({
       {/* Longitudinal Silent Deterioration Detector (last completed calls) */}
       <LongitudinalTrendCard personId={log.person_id} currentLog={log} />
 
+      {/* Provenance & Clinical Estimation Transparency */}
+      {(log.is_simulated || log.conversation_id?.startsWith("sim-") || log.analyzer_model || report?.auditoria_veracidad?.analyzer_model) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border bg-secondary/40 px-3.5 py-2 text-[11px] font-semibold text-muted-foreground">
+          <span>
+            {log.is_simulated || log.conversation_id?.startsWith("sim-")
+              ? "Registro de simulación guiada (datos de demostración)"
+              : `Cribado conversacional orientativo · Motor: ${
+                  log.analyzer_model || report?.auditoria_veracidad?.analyzer_model
+                }`}
+          </span>
+          {log.qa_status === "verified_accurate" && (
+            <span className="font-bold text-success">Validado QA por coordinación</span>
+          )}
+        </div>
+      )}
+
       {/* Discrete B2B API / Webhook Payload Viewer */}
       <B2BWebhookViewer log={log} />
     </article>

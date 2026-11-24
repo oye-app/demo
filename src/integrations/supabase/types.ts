@@ -129,58 +129,79 @@ export type Database = {
           acepta_llamada: boolean | null
           acepta_llamadas_diarias: boolean | null
           activar_protocolo_voy_yo: boolean | null
+          analyzer_model: string
           call_sid: string | null
           conversation_id: string | null
           created_at: string
           duracion_seg: number | null
           global_pct: number | null
           id: string
+          is_simulated: boolean
           llamada_inicio: string | null
           motivo: string | null
           nivel_alerta: string | null
           nombre: string | null
           person_id: string
+          qa_note: string
+          qa_reviewed_at: string | null
+          qa_reviewed_by: string
+          qa_status: string
           report: Json | null
           status: string
           telefono_usuario: string | null
+          transcript_turns: Json
         }
         Insert: {
           acepta_llamada?: boolean | null
           acepta_llamadas_diarias?: boolean | null
           activar_protocolo_voy_yo?: boolean | null
+          analyzer_model?: string
           call_sid?: string | null
           conversation_id?: string | null
           created_at?: string
           duracion_seg?: number | null
           global_pct?: number | null
           id?: string
+          is_simulated?: boolean
           llamada_inicio?: string | null
           motivo?: string | null
           nivel_alerta?: string | null
           nombre?: string | null
           person_id: string
+          qa_note?: string
+          qa_reviewed_at?: string | null
+          qa_reviewed_by?: string
+          qa_status?: string
           report?: Json | null
           status?: string
           telefono_usuario?: string | null
+          transcript_turns?: Json
         }
         Update: {
           acepta_llamada?: boolean | null
           acepta_llamadas_diarias?: boolean | null
           activar_protocolo_voy_yo?: boolean | null
+          analyzer_model?: string
           call_sid?: string | null
           conversation_id?: string | null
           created_at?: string
           duracion_seg?: number | null
           global_pct?: number | null
           id?: string
+          is_simulated?: boolean
           llamada_inicio?: string | null
           motivo?: string | null
           nivel_alerta?: string | null
           nombre?: string | null
           person_id?: string
+          qa_note?: string
+          qa_reviewed_at?: string | null
+          qa_reviewed_by?: string
+          qa_status?: string
           report?: Json | null
           status?: string
           telefono_usuario?: string | null
+          transcript_turns?: Json
         }
         Relationships: []
       }
@@ -1002,6 +1023,28 @@ export type Database = {
           _description?: string
         }
         Returns: string | null
+      }
+      console_submit_call_qa: {
+        Args: {
+          _call_id: string
+          _qa_status: string
+          _qa_note?: string
+        }
+        Returns: boolean
+      }
+      console_qa_metrics: {
+        Args: never
+        Returns: {
+          total_live_calls: number
+          simulated_count: number
+          llm_calls_count: number
+          deterministic_count: number
+          verified_count: number
+          false_positive_count: number
+          false_negative_count: number
+          pending_qa_count: number
+          precision_pct: number | null
+        }[]
       }
       manage_person: {
         Args: {

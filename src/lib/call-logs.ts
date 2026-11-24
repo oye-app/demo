@@ -13,10 +13,26 @@ export type CallLogStatus =
   | "no_contesta"
   | "error";
 
+export type TranscriptTurn = {
+  role: "agent" | "user";
+  timeSec?: number;
+  text: string;
+};
+
 export type SituationReport = {
   schema_version?: string;
   telefono_usuario?: string;
   timestamp_evaluacion?: string;
+  call_validity?: "verified_human" | "voicemail_or_incomplete" | "third_party_blocked" | string;
+  validity_reason?: string | null;
+  auditoria_veracidad?: {
+    analyzer_model?: string;
+    call_validity?: string;
+    user_turns_count?: number;
+    user_words_count?: number;
+    verified_quotes_count?: number;
+    has_timestamps?: boolean;
+  };
   nivel_alerta: NivelAlerta;
   score_bienestar_global?: number;
   global_pct: number;
@@ -109,6 +125,13 @@ export type CallLogRow = {
   activar_protocolo_voy_yo: boolean | null;
   acepta_llamada: boolean | null;
   acepta_llamadas_diarias: boolean | null;
+  transcript_turns?: TranscriptTurn[] | null;
+  analyzer_model?: string | null;
+  is_simulated?: boolean | null;
+  qa_status?: string | null;
+  qa_note?: string | null;
+  qa_reviewed_by?: string | null;
+  qa_reviewed_at?: string | null;
   report: SituationReport | null;
 };
 

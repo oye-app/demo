@@ -1042,6 +1042,50 @@ export function buildNativeTriagePayload(row: ConsoleCensusRow) {
   };
 }
 
+export type ConsoleQaMetrics = {
+  total_live_calls: number;
+  simulated_count: number;
+  llm_calls_count: number;
+  deterministic_count: number;
+  verified_count: number;
+  false_positive_count: number;
+  false_negative_count: number;
+  pending_qa_count: number;
+  precision_pct: number | null;
+};
+
+export function computeModelProvenanceBadge(log: CallLogRow): {
+  label: string;
+  tone: "llm" | "rules" | "sim" | "legacy";
+} {
+  const isSim = Boolean(log.is_simulated || (log.conversation_id && log.conversation_id.startsWith("sim-")));
+  if (isSim) {
+    return { label: "Simulación / Test", tone: "sim" };
+  }
+  const model = log.analyzer_model || log.report?.auditoria_veracidad?.analyzer_model || "";
+  if (model.toLowerCase().includes("gpt-4o")) {
+    return { label: "GPT-4o + Verificado", tone: "llm" };
+  }
+  if (model.includes("deterministic_v")) {
+    return { label: "Reglas Clínicas v4", tone: "rules" };
+  }
+  return { label: "Histórico anterior", tone: "legacy" };
+}
+
+export function useConsoleQaMetrics(enabled = true) {
+  return useQuery({
+    queryKey: ["console", "qa-metrics"],
+    enabled,
+    queryFn: async (): Promise<ConsoleQaMetrics | null> => {
+      const { data, error } = await supabase.rpc("console_qa_metrics");
+      if (error) throw error;
+      return (data?.[0] as ConsoleQaMetrics | undefined) ?? null;
+    },
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+  });
+}
+
 export function useSeniorDossier(seniorId?: string) {
   return useQuery({
     queryKey: ["console", "dossier", seniorId ?? ""],

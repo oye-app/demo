@@ -109,6 +109,91 @@ function parseTranscriptTurns(rawTranscript: string, rawArray?: any[]): Turn[] {
   return turns;
 }
 
+function detectCallValidity(params: {
+  userTurns: Turn[];
+  userFullText: string;
+}): {
+  valid: boolean;
+  reason: string;
+  callValidity: "verified_human" | "voicemail_or_incomplete" | "third_party_blocked";
+} {
+  const { userTurns, userFullText } = params;
+  const trimmed = userFullText.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+
+  if (
+    /(buz[oó]n de voz|deje su mensaje|despu[eé]s de la se[ñn]al|contestador autom[aá]tico|no se encuentra disponible|el tel[eé]fono al que llama|persona a la que llama|pulse la almohadilla|grabe su mensaje)/i.test(
+      trimmed
+    )
+  ) {
+    return {
+      valid: false,
+      reason: "Contestador automático o buzón de voz detectado: se requiere rellamada real.",
+      callValidity: "voicemail_or_incomplete",
+    };
+  }
+
+  if (
+    userTurns.length <= 2 &&
+    /(no est[aá] en casa ahora|no puede ponerse ahora|se equivoca de n[uú]mero|n[uú]mero equivocado|sali[oó] y no est[aá])/i.test(
+      trimmed
+    )
+  ) {
+    return {
+      valid: false,
+      reason: "Atendió un tercero sin poder hablar con la persona mayor: pendiente de reintento.",
+      callValidity: "third_party_blocked",
+    };
+  }
+
+  if (userTurns.length === 0 || words.length < 4) {
+    return {
+      valid: false,
+      reason: "Llamada sin respuesta verbal suficiente (< 4 palabras): no puede validarse como Verde.",
+      callValidity: "voicemail_or_incomplete",
+    };
+  }
+
+  return {
+    valid: true,
+    reason: "",
+    callValidity: "verified_human",
+  };
+}
+
+function verifyQuotesAgainstTranscript(aiQuotes: unknown, userFullText: string, fallbackQuotes: string[]): string[] {
+  const normText = userFullText
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[«»"'¿¡.,;:!?()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!Array.isArray(aiQuotes)) return fallbackQuotes;
+
+  const verified = aiQuotes
+    .filter((q): q is string => typeof q === "string" && q.trim().length >= 6)
+    .map((q) => q.trim())
+    .filter((q) => {
+      const normQ = q
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[«»"'¿¡.,;:!?()]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!normQ) return false;
+      if (normText.includes(normQ)) return true;
+      const tokens = normQ.split(" ").filter((t) => t.length >= 3);
+      if (tokens.length === 0) return false;
+      const matched = tokens.filter((t) => normText.includes(t)).length;
+      return matched / tokens.length >= 0.75;
+    });
+
+  return verified.length > 0 ? verified.slice(0, 3) : fallbackQuotes;
+}
+
 function analyzeSpanishConversation(params: {
   turns: Turn[];
   rawTranscript: string;
@@ -135,6 +220,8 @@ function analyzeSpanishConversation(params: {
           .join(" ");
 
   const userLower = userFullText.toLowerCase();
+  const validity = detectCallValidity({ userTurns, userFullText });
+  const analyzerModel = rawAiReport ? "gpt-4o+verified" : "deterministic_v4";
 
   // Pair each user turn with the immediately preceding agent turn for Q&A context
   const qaPairs: { agentQ: string; userA: string }[] = [];
@@ -147,11 +234,16 @@ function analyzeSpanishConversation(params: {
     }
   }
 
-  // Extract verbatim quotes spoken by the user (prefer substantive non-greeting, non-question sentences sorted by clinical relevance/length)
-  const isConversationalFiller = (txt: string) =>
-    /^(hola|buenos d[ií]as|buenas tardes|s[ií]|no|vale|claro|adi[oó]s|hasta luego|c[oó]mo puedo ayudar|me puede repetir|d[ií]game|te escucho|le escucho|un momento)\b/i.test(
-      txt.replace(/^[.¿¡,\s]+/, "")
-    );
+  // Extract verbatim quotes spoken by the user (prefer substantive non-greeting, non-question ASR noise)
+  const isConversationalFiller = (txt: string) => {
+    const clean = txt.replace(/^[.¿¡,\s]+/, "").trim();
+    const wordCount = clean.split(/\s+/).filter(Boolean).length;
+    if (/^(hola|buenos d[ií]as|buenas tardes|s[ií]|no|vale|claro|adi[oó]s|hasta luego|c[oó]mo puedo ayudar|me puede repetir|d[ií]game|te escucho|le escucho|un momento|inteligencia)\b/i.test(clean)) {
+      return true;
+    }
+    if (wordCount <= 3 && /\?$/.test(clean)) return true;
+    return false;
+  };
 
   const nonGreetingUserQuotes = userTurns
     .map((t) => t.text.trim())
@@ -163,52 +255,74 @@ function analyzeSpanishConversation(params: {
 
   const fallbackUserQuotes = userTurns.map((t) => t.text.trim()).filter((txt) => txt.length > 0);
   const combinedQuotes = [...nonGreetingUserQuotes, ...substantiveUserQuotes.filter((q) => !nonGreetingUserQuotes.includes(q))];
-  const extractedQuotes =
-    Array.isArray(rawAiReport?.citas_textuales) && rawAiReport.citas_textuales.length > 0
-      ? rawAiReport.citas_textuales
-      : combinedQuotes.length > 0
+  const fallbackQuoteList =
+    combinedQuotes.length > 0
       ? combinedQuotes.slice(0, 3)
       : fallbackUserQuotes.length > 0
       ? fallbackUserQuotes.slice(0, 3)
       : ["Conversación telefónica registrada sin intervenciones extensas."];
+
+  const extractedQuotes = verifyQuotesAgainstTranscript(
+    rawAiReport?.citas_textuales,
+    userFullText,
+    fallbackQuoteList
+  );
 
   // 1. Detect Emergency / Red Flags strictly from USER speech
   const emergencyMatch = userFullText.match(
     /(me he ca[ií]do|me ca[ií]|estoy en el suelo|no puedo levantarme|duele mucho el pecho|dolor en el pecho|me ahogo|no puedo respirar|falta el aire|sangr[aeo]|me desmayo|no quiero vivir|quitarme la vida|mejor muert[ao]|socorro|ayuda urgente|auxilio)/i
   );
 
-  // 2. Detect Physical Pain / Symptoms from USER speech
+  // 2. Detect Physical Pain / Symptoms from USER speech (with explicit negation guards)
+  const hasNegatedPain = /\b(no\s+me\s+duele\s+nada|sin\s+dolor|ning[uú]n\s+dolor|nada\s+de\s+(?:dolor|mareo)|no\s+tengo\s+dolor)\b/i.test(
+    userLower
+  );
   const painMatches: string[] = [];
-  if (/\b(espalda|lumbar)\b/i.test(userLower)) painMatches.push("dolor de espalda");
-  if (/\b(rodilla|pierna|cadera|pie|tobillo)\b/i.test(userLower)) painMatches.push("molestia en piernas/rodilla");
-  if (/\b(cabeza|jaqueca|migra[ñn]a)\b/i.test(userLower)) painMatches.push("dolor de cabeza");
-  if (/\b(mare[oa]|maread[ao]|inestable|v[eé]rtigo)\b/i.test(userLower)) painMatches.push("sensación de mareo");
-  if (/\b(est[oó]mago|barriga|tripa|n[aá]usea)\b/i.test(userLower)) painMatches.push("malestar estomacal");
-  if (/\b(cansad[ao]|floj[ao]|agotad[ao]|sin fuerzas|fatiga)\b/i.test(userLower)) painMatches.push("cansancio físico");
-  if (/\b(tensi[oó]n alta|fiebre|tos|resfriad[ao]|gripe)\b/i.test(userLower)) painMatches.push("síntomas leves de salud");
-  if (painMatches.length === 0 && /\b(me duele|tengo dolor|dolorid[ao]|molestia)\b/i.test(userLower)) {
-    painMatches.push("molestia física referida");
+  if (!hasNegatedPain) {
+    if (/\b(dolor\s+de\s+espalda|duele\s+la\s+espalda|lumbar)\b/i.test(userLower)) painMatches.push("dolor de espalda");
+    if (/\b(dolor\s+de\s+(?:rodilla|pierna|cadera)|duele\s+la\s+(?:rodilla|pierna|cadera)|artrosis)\b/i.test(userLower)) {
+      painMatches.push("molestia en piernas/rodilla");
+    }
+    if (/\b(dolor\s+de\s+cabeza|duele\s+la\s+cabeza|jaqueca|migra[ñn]a)\b/i.test(userLower)) {
+      painMatches.push("dolor de cabeza");
+    }
+    if (/\b(mare[oa]|maread[ao]|inestable|v[eé]rtigo)\b/i.test(userLower)) painMatches.push("sensación de mareo");
+    if (/\b(dolor\s+de\s+est[oó]mago|barriga|tripa|n[aá]usea)\b/i.test(userLower)) painMatches.push("malestar estomacal");
+    if (/\b(muy\s+cansad[ao]|agotad[ao]|sin\s+fuerzas|fatiga|floj[ao])\b/i.test(userLower)) {
+      painMatches.push("cansancio físico");
+    }
+    if (/\b(tensi[oó]n alta|fiebre|tos|resfriad[ao]|gripe)\b/i.test(userLower)) painMatches.push("síntomas leves de salud");
+    if (painMatches.length === 0 && /\b(me duele|tengo dolor|dolorid[ao]|molestia)\b/i.test(userLower)) {
+      painMatches.push("molestia física referida");
+    }
   }
 
-  // 3. Analyze Sleep / Descanso (Q&A and clause aware)
+  // 3. Analyze Sleep / Descanso (Q&A and clause aware; handles subordinate "aunque un poco cansada" cleanly)
   let sleepStatus: "CORRECTO" | "INSOMNIO_FATIGA" | "ALERTA" | "NO_MENCIONADO" = "NO_MENCIONADO";
   let sleepQuote = "";
   for (const { agentQ, userA } of qaPairs) {
     const qAboutSleep = /\b(dormid[oa]|dormir|noche|descansad[oa]|descansar|cama|despert)\b/i.test(agentQ);
-    const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
+    const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|\baunque\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
     const sleepClause =
-      clauses.find((c) => /\b(dorm[ií]|dormid[oa]|noche|descans[eé]|descansad[oa]|insomnio|desvelad[ao]|despert[eé]|pegu[eé] ojo)\b/i.test(c)) ||
+      clauses.find((c) => /(?:^|[^a-záéíóúüñ0-9_])(dorm[ií]|dormid[oa]|noche|descans[eé]|descansad[oa]|insomnio|desvelad[ao]|despert[eé]|pegu[eé] ojo)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)) ||
       (qAboutSleep ? clauses[0] || userA : "");
     if (sleepClause) {
       sleepQuote = userA;
-      if (/\b(fatal|muy mal|no dorm[ií]|no he dormido|no pegu[eé] ojo|en vela|casi nada|despert[eé] muchas)\b/i.test(sleepClause)) {
+      if (/(?:^|[^a-záéíóúüñ0-9_])(fatal|muy mal|no dorm[ií]|no he dormido|no pegu[eé] ojo|en vela|casi nada|despert[eé] muchas)(?=$|[^a-záéíóúüñ0-9_])/i.test(sleepClause)) {
         sleepStatus = "ALERTA";
-      } else if (/\b(mal|regular|poco|cost[oó]\s*(?:mucho\s*)?dormir\w*|desvelad[ao]|insomnio|me despert[eé])\b/i.test(sleepClause)) {
+      } else if (
+        /(?:^|[^a-záéíóúüñ0-9_])(dorm[ií]\w*\s+(?:mal|poco|regular)|descans[eé]\w*\s+(?:mal|poco)|poco\s+sue[ñn]o|mal|regular|cost[oó]\s*(?:mucho\s*)?dormir\w*|desvelad[ao]|insomnio|me despert[eé])(?=$|[^a-záéíóúüñ0-9_])/i.test(
+          sleepClause
+        )
+      ) {
         sleepStatus = "INSOMNIO_FATIGA";
-      } else if (/\b(bien|muy bien|estupend|fenomenal|toda la noche|de un tir[oó]n|descans[eé]|s[ií])\b/i.test(sleepClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(bastante bien|muy bien|bien|estupend|fenomenal|toda la noche|de un tir[oó]n|descans[eé]|s[ií])(?=$|[^a-záéíóúüñ0-9_])/i.test(sleepClause)) {
         sleepStatus = "CORRECTO";
       }
     }
+  }
+  if (rawAiReport?.sueno_descanso && ["CORRECTO", "INSOMNIO_FATIGA", "ALERTA", "NO_MENCIONADO"].includes(rawAiReport.sueno_descanso)) {
+    sleepStatus = rawAiReport.sueno_descanso;
   }
 
   // 4. Analyze Food / Alimentación (Q&A and clause aware, including common STT homophones like "desafiné" -> "desayuné")
@@ -219,39 +333,46 @@ function analyzeSpanishConversation(params: {
     const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
     const foodClause =
       clauses.find((c) =>
-        /\b(desayun\w*|desafin\w*|com[ií]\w*|comid[oa]|cen[eé]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|pur[eé]|pan|yogur|galleta\w*|hambre|apetito|cocin\w*)\b/i.test(c)
+        /(?:^|[^a-záéíóúüñ0-9_])(desayun\w*|desafin\w*|com[ií]\w*|comid[oa]|cen[eé]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|pur[eé]|pan|yogur|galleta\w*|hambre|apetito|cocin\w*)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)
       ) || (qAboutFood && !/\bpastilla|medicaci|medicamento/i.test(userA) ? clauses[0] || userA : "");
     if (foodClause) {
       foodQuote = userA;
-      if (/\b(no he comido nada|sin comer|no tengo nada de hambre|no quiero comer|no desayun[eé])\b/i.test(foodClause)) {
+      if (/(?:^|[^a-záéíóúüñ0-9_])(no he comido nada|sin comer|no tengo nada de hambre|no quiero comer|no desayun[eé])(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
         foodStatus = "ALERTA";
-      } else if (/\b(todav[ií]a no|a[uú]n no|poca hambre|no ten[ií]a\s*(?:mucha\s*)?hambre|muy poco|sin ganas|solo un poco|casi nada|no he desayunado)\b/i.test(foodClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(todav[ií]a no|a[uú]n no|poca hambre|no ten[ií]a\s*(?:mucha\s*)?hambre|muy poco|sin ganas|solo un poco|casi nada|no he desayunado)(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
         foodStatus = "DESCUIDO";
-      } else if (/\b(s[ií]|desayun\w*|com[ií]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|bien|ya tom[eé])\b/i.test(foodClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(s[ií]|desayun\w*|com[ií]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|bien|ya tom[eé])(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
         foodStatus = "CORRECTO";
       }
     }
+  }
+
+  if (rawAiReport?.alimentacion_hidratacion && ["CORRECTO", "DESCUIDO", "ALERTA", "NO_MENCIONADO"].includes(rawAiReport.alimentacion_hidratacion)) {
+    foodStatus = rawAiReport.alimentacion_hidratacion;
   }
 
   // 5. Analyze Medication / Adherencia (Q&A and clause aware)
   let medStatus: "CONFIRMADA" | "DUDOSA" | "NO_TOMADA" | "NO_MENCIONADA" = "NO_MENCIONADA";
   let medQuote = "";
   for (const { agentQ, userA } of qaPairs) {
-    const qAboutMed = /\b(pastilla|medicaci[oó]n|medicamento|tratamiento|tensi[oó]n|enalapril|sintrom|dosis)\b/i.test(agentQ);
+    const qAboutMed = /\b(pastilla|medicaci[oó]n|medicamento|tratamiento|tensi[oó]n|enalapril|sintrom|dosis)/i.test(agentQ);
     const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
     const medClause =
-      clauses.find((c) => /\b(pastilla|medicaci[oó]n|medicamento|enalapril|sintrom|me la tom[eé]|ya la tom[eé]|olvid[eé]|olvid[oó]|se me hab[ií]a pasado|no me la he tomado)\b/i.test(c)) ||
-      (qAboutMed && !/\bdesayun|caf[eé]|tostada/i.test(userA) ? clauses[0] || userA : "");
+      clauses.find((c) => /(?:^|[^a-záéíóúüñ0-9_])(pastilla|medicaci[oó]n|medicamento|enalapril|sintrom|me la tom[eé]|ya la tom[eé]|olvid[eé]|olvid[oó]|se me hab[ií]a pasado|no me la he tomado)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)) ||
+      (qAboutMed ? clauses[0] || userA : "");
     if (medClause) {
       medQuote = userA;
-      if (/\b(no me la he tomado|no la tom[eé]|me olvid[eé]|se me olvid[oó]|se me ha olvidado|se me hab[ií]a pasado|todav[ií]a no|a[uú]n no)\b/i.test(medClause)) {
+      if (/(?:^|[^a-záéíóúüñ0-9_])(no me la he tomado|no la tom[eé]|me olvid[eé]|se me olvid[oó]|se me ha olvidado|se me hab[ií]a pasado|todav[ií]a no|a[uú]n no)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
         medStatus = "NO_TOMADA";
-      } else if (/\b(no me acuerdo|no s[eé] si|creo que|duda|luego me la tomo)\b/i.test(medClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(no me acuerdo|no s[eé] si|creo que|duda|luego me la tomo)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
         medStatus = "DUDOSA";
-      } else if (/\b(s[ií]|ya me la tom[eé]|tomada|como siempre|ya la he tomado|claro|por supuesto)\b/i.test(medClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(s[ií]|ya me la tom[eé]|me la tom[eé]|tomada|como siempre|ya la he tomado|claro|por supuesto)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
         medStatus = "CONFIRMADA";
       }
     }
+  }
+  if (rawAiReport?.adherencia_medicacion && ["CONFIRMADA", "DUDOSA", "NO_TOMADA", "NO_MENCIONADA"].includes(rawAiReport.adherencia_medicacion)) {
+    medStatus = rawAiReport.adherencia_medicacion;
   }
 
   // 6. Analyze Loneliness & Social Contact (UCLA-3: 3 to 9)
@@ -290,11 +411,12 @@ function analyzeSpanishConversation(params: {
   const severeMoodMatch = userFullText.match(
     /(muy triste|llorando|he llorado|sin ganas de nada|deprimid[ao]|no sirvo para nada|todo me sale mal|no tengo ilusi[oó]n|cansad[ao] de vivir)/i
   );
-  const mildMoodMatch = userFullText.match(
-    /(triste|desanimad[ao]|baj[oó]n|apagad[ao]|poco animad[ao]|mal d[ií]a|preocupad[ao]|angustiad[ao]|nervios[ao]|nostalgia|melanc[oó]lic[ao]|cansad[ao])/i
+  const userTextWithoutMildFatigue = userFullText.replace(/\b(?:un\s+)?poco\s+cansad[ao]\b/gi, "");
+  const mildMoodMatch = userTextWithoutMildFatigue.match(
+    /(triste|desanimad[ao]|baj[oó]n|apagad[ao]|poco animad[ao]|mal d[ií]a|preocupad[ao]|angustiad[ao]|nervios[ao]|nostalgia|melanc[oó]lic[ao]|muy\s+cansad[ao]|agotad[ao])/i
   );
   const positiveMoodMatch = userFullText.match(
-    /(muy bien|estupend|fenomenal|content[ao]|tranquil[ao]|animad[ao]|alegre|feliz|con ganas|bien gracias|todo bien)/i
+    /(bastante bien|muy bien|estupend|fenomenal|content[ao]|tranquil[ao]|animad[ao]|alegre|feliz|con ganas|bien gracias|todo bien)/i
   );
 
   if (severeMoodMatch) {
@@ -339,7 +461,7 @@ function analyzeSpanishConversation(params: {
       ? 2
       : 3;
 
-  // 9. Determine Alert Level (VERDE / AMARILLO / ROJO)
+  // 9. Determine Alert Level (VERDE / AMARILLO / ROJO) — Voicemail / Third-Party / Empty NEVER passes as VERDE
   const isRed =
     rawAiReport?.nivel_alerta === "ROJO" ||
     Boolean(emergencyMatch) ||
@@ -347,12 +469,13 @@ function analyzeSpanishConversation(params: {
 
   const isYellow =
     !isRed &&
-    (rawAiReport?.nivel_alerta === "AMARILLO" ||
+    (!validity.valid ||
+      rawAiReport?.nivel_alerta === "AMARILLO" ||
       uclaScore3to9 >= 6 ||
       gdsScore >= 2 ||
       painMatches.length > 0 ||
       sleepStatus === "ALERTA" ||
-       sleepStatus === "INSOMNIO_FATIGA" ||
+      sleepStatus === "INSOMNIO_FATIGA" ||
       foodStatus === "ALERTA" ||
       foodStatus === "DESCUIDO" ||
       medStatus === "NO_TOMADA" ||
@@ -531,35 +654,40 @@ function analyzeSpanishConversation(params: {
       ? `${Math.floor(durationSec / 60)} min ${durationSec % 60 > 0 ? `${durationSec % 60} s` : ""}`.trim()
       : `${durationSec} s`;
 
-  const home_headline =
-    rawAiReport?.home_headline ||
-    (nivel_alerta === "ROJO"
-      ? `Atención urgente: ${firstName} necesita ayuda (${emergencyMatch?.[0] || "alerta en llamada"})`
-      : nivel_alerta === "AMARILLO"
-      ? painMatches.length > 0
-        ? `${firstName} mencionó ${painMatches[0]} durante la llamada`
-        : medStatus === "NO_TOMADA" || medStatus === "DUDOSA"
-        ? `${firstName} tiene pendiente su medicación de hoy`
-        : uclaScore3to9 >= 6
-        ? `${firstName} expresó sentirse sola y agradecería compañía hoy`
-        : `${firstName} conversó con OYE · Requiere seguimiento suave hoy`
-      : `${firstName} conversó con OYE (${durLabel}) y se encuentra bien`);
+  const home_headline = !validity.valid
+    ? validity.callValidity === "third_party_blocked"
+      ? `Atendió otra persona — no se pudo hablar con ${firstName}`
+      : `Contestador o llamada sin respuesta de ${firstName}`
+    : rawAiReport?.home_headline ||
+      (nivel_alerta === "ROJO"
+        ? `Atención urgente: ${firstName} necesita ayuda (${emergencyMatch?.[0] || "alerta en llamada"})`
+        : nivel_alerta === "AMARILLO"
+        ? painMatches.length > 0
+          ? `${firstName} mencionó ${painMatches[0]} durante la llamada`
+          : medStatus === "NO_TOMADA" || medStatus === "DUDOSA"
+          ? `${firstName} tiene pendiente su medicación de hoy`
+          : uclaScore3to9 >= 6
+          ? `${firstName} expresó sentirse sola y agradecería compañía hoy`
+          : `${firstName} conversó con OYE · Requiere seguimiento suave hoy`
+        : `${firstName} conversó con OYE (${durLabel}) y se encuentra bien`);
 
-  const call_title =
-    rawAiReport?.call_title ||
-    (nivel_alerta === "ROJO"
-      ? "Alerta prioritaria detectada en llamada"
-      : nivel_alerta === "AMARILLO"
-      ? `Seguimiento preventivo · ${badges.slice(0, 2).join(" · ")}`
-      : `Llamada completada (${durLabel}) · ${badges.slice(0, 2).join(" · ")}`);
+  const call_title = !validity.valid
+    ? "Llamada no válida · Reintento / protocolo No Contesta"
+    : rawAiReport?.call_title ||
+      (nivel_alerta === "ROJO"
+        ? "Alerta prioritaria detectada en llamada"
+        : nivel_alerta === "AMARILLO"
+        ? `Seguimiento preventivo · ${badges.slice(0, 2).join(" · ")}`
+        : `Llamada completada (${durLabel}) · ${badges.slice(0, 2).join(" · ")}`);
 
   const firstQuoteSnippet = extractedQuotes[0] ? ` Dijo textualmente: «${extractedQuotes[0]}».` : "";
 
-  const summary =
-    rawAiReport?.summary ||
-    (discussedDetails.length > 0
-      ? `En la llamada de hoy (${durLabel}, ${userTurns.length} intervenciones), ${firstName} ${discussedDetails.join(", ")}.${firstQuoteSnippet}`
-      : `En la llamada de hoy (${durLabel}, ${userTurns.length} intervenciones), ${firstName} mantuvo una charla breve con OYE sin referir molestias ni incidencias.${firstQuoteSnippet}`);
+  const summary = !validity.valid
+    ? `${validity.reason}${firstQuoteSnippet}`
+    : rawAiReport?.summary ||
+      (discussedDetails.length > 0
+        ? `En la llamada de hoy (${durLabel}, ${userTurns.length} intervenciones), ${firstName} ${discussedDetails.join(", ")}.${firstQuoteSnippet}`
+        : `En la llamada de hoy (${durLabel}, ${userTurns.length} intervenciones), ${firstName} mantuvo una charla breve con OYE sin referir molestias ni incidencias.${firstQuoteSnippet}`);
 
   const notMentionedItems: string[] = [];
   if (sleepStatus === "NO_MENCIONADO") notMentionedItems.push("descanso nocturno");
@@ -771,6 +899,16 @@ function analyzeSpanishConversation(params: {
       contacto_con_llave: keyHolderLabel,
     },
     tendencia_longitudinal,
+    call_validity: validity.callValidity,
+    validity_reason: validity.reason || null,
+    auditoria_veracidad: {
+      analyzer_model: analyzerModel,
+      call_validity: validity.callValidity,
+      user_turns_count: userTurns.length,
+      user_words_count: userWordCount,
+      verified_quotes_count: extractedQuotes.length,
+      has_timestamps: responseLatencies.length > 0,
+    },
   };
 }
 
@@ -1003,7 +1141,7 @@ Deno.serve(async (req: Request) => {
             {
               role: "system",
               content:
-                "Analiza fielmente la transcripción real en español entre OYE (AGENT) y la persona mayor (USER). No inventes datos que no se hayan mencionado en la conversación ni en el historial previo. Si hay historial previo, en `oye_recuerda_insight` compara explícitamente cómo ha evolucionado respecto a las llamadas anteriores (p. ej. mejoría, persistencia o descenso de ánimo/síntomas). Devuelve JSON con nivel_alerta, home_headline, call_title, summary, oye_recuerda_insight, diagnostico_situacion_ejecutivo, citas_textuales (frases exactas de USER), recomendacion_familiar, activar_protocolo_voy_yo.",
+                "Analiza fielmente la transcripción real en español entre OYE (AGENT) y la persona mayor (USER). REGLA DE VERACIDAD ESTRICTA: Nunca inventes datos ni citas. Toda cita en `citas_textuales` debe copiar fragmentos EXACTOS dichos por USER. Evalúa negaciones y contexto real (ej. 'dormí bien aunque un poco cansada' NO es insomnio). Si hay historial previo, en `oye_recuerda_insight` compara explícitamente cómo evolucionó. Devuelve JSON con: nivel_alerta ('VERDE'|'AMARILLO'|'ROJO'), adherencia_medicacion ('CONFIRMADA'|'DUDOSA'|'NO_TOMADA'|'NO_MENCIONADA'), sueno_descanso ('CORRECTO'|'INSOMNIO_FATIGA'|'ALERTA'|'NO_MENCIONADO'), alimentacion_hidratacion ('CORRECTO'|'DESCUIDO'|'ALERTA'|'NO_MENCIONADO'), home_headline, call_title, summary, oye_recuerda_insight, diagnostico_situacion_ejecutivo, citas_textuales (array de frases exactas de USER), recomendacion_familiar, activar_protocolo_voy_yo.",
             },
             {
               role: "user",
@@ -1057,25 +1195,30 @@ Deno.serve(async (req: Request) => {
         }
 
         if (targetConvId) {
+          const isInvalidCall = reportObj.call_validity && reportObj.call_validity !== "verified_human";
+          const effectiveStatus = isInvalidCall ? "no_contesta" : "completada";
           await sb.from("call_logs").upsert(
             {
               conversation_id: targetConvId,
               person_id: resolvedPersonId,
               nombre: seniorName.split(/\s+/)[0] || "Carmen",
               telefono_usuario: phone,
-              status: "completada",
-              motivo: reportObj.summary,
+              status: effectiveStatus,
+              motivo: isInvalidCall ? (reportObj.validity_reason || reportObj.summary) : reportObj.summary,
               duracion_seg: durationSec,
               nivel_alerta: reportObj.nivel_alerta,
-              global_pct: reportObj.global_pct,
-              activar_protocolo_voy_yo: reportObj.activar_protocolo_voy_yo,
-              acepta_llamada: true,
+              global_pct: isInvalidCall ? null : reportObj.global_pct,
+              activar_protocolo_voy_yo: isInvalidCall ? true : reportObj.activar_protocolo_voy_yo,
+              acepta_llamada: !isInvalidCall,
               acepta_llamadas_diarias: true,
+              transcript_turns: turns,
+              analyzer_model: reportObj.auditoria_veracidad?.analyzer_model || (openAiKey ? "gpt-4o+verified" : "deterministic_v4"),
+              is_simulated: Boolean(body.is_simulated),
               report: reportObj,
             },
             { onConflict: "conversation_id" }
           );
-          console.log(`[analyze-call] Saved report directly to call_logs for convId=${targetConvId}`);
+          console.log(`[analyze-call] Saved report directly to call_logs for convId=${targetConvId} status=${effectiveStatus}`);
         }
       } catch (dbErr) {
         console.error("[analyze-call] Direct DB upsert warning:", dbErr);
@@ -1089,7 +1232,7 @@ Deno.serve(async (req: Request) => {
         id: `chatcmpl-${crypto.randomUUID()}`,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
-        model: openAiKey ? "gpt-4o" : "oye-clinical-analyzer-v3",
+        model: reportObj.auditoria_veracidad?.analyzer_model || (rawAiReport ? "gpt-4o+verified" : "deterministic_v4"),
         choices: [
           {
             index: 0,

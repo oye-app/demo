@@ -9,6 +9,7 @@ import {
   classifyUrgencyTier,
   computeCohortUnitEconomics,
   computeDistrictCoverage,
+  computeModelProvenanceBadge,
   computeSlaStatus,
   computeTodayScheduleCoverage,
   extractLifeStoryQuotes,
@@ -17,6 +18,7 @@ import {
   SAMPLE_BARRIO_CSV,
   type ConsoleCensusRow,
   type ConsoleCohortSummary,
+  type ConsoleQaMetrics,
   type ConsoleVolunteerRow,
 } from "@/lib/console";
 import type { CallLogRow } from "@/lib/call-logs";
@@ -26,6 +28,7 @@ import { BatchImportModal } from "@/components/console/batch-import-modal";
 import { ClinicalTrajectoryChart } from "@/components/console/clinical-trajectory-chart";
 import { FhirViewerCard } from "@/components/console/fhir-viewer-card";
 import { DailyAgendaPanel } from "@/components/console/daily-agenda-panel";
+import { VeracityAuditPanel } from "@/components/console/veracity-audit-panel";
 
 vi.mock("@tanstack/react-router", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
@@ -301,6 +304,49 @@ describe("OYE Consola Web Desktop & Lógica Clínica N1", () => {
     const econ = computeCohortUnitEconomics(summary);
     expect(econ.monthlyB2bRevEur).toBe(1380);
     expect(econ.savedHumanHours).toBe(425);
+  });
+
+  it("computeModelProvenanceBadge y VeracityAuditPanel distinguen simulación, reglas y GPT-4o verificado", () => {
+    const qc = new QueryClient();
+    const simProv = computeModelProvenanceBadge(makeCallLog({ is_simulated: true }));
+    expect(simProv.tone).toBe("sim");
+
+    const llmProv = computeModelProvenanceBadge(makeCallLog({ analyzer_model: "gpt-4o+verified" }));
+    expect(llmProv.tone).toBe("llm");
+
+    const rulesProv = computeModelProvenanceBadge(makeCallLog({ analyzer_model: "deterministic_v4" }));
+    expect(rulesProv.tone).toBe("rules");
+
+    const logWithTurns = makeCallLog({
+      analyzer_model: "deterministic_v4",
+      transcript_turns: [
+        { role: "agent", timeSec: 1, text: "Buenos días Carmen" },
+        { role: "user", timeSec: 4, text: "Me tomé el café leyendo el periódico." },
+      ],
+    });
+
+    const qaMetrics: ConsoleQaMetrics = {
+      total_live_calls: 10,
+      simulated_count: 2,
+      llm_calls_count: 8,
+      deterministic_count: 2,
+      verified_count: 9,
+      false_positive_count: 1,
+      false_negative_count: 0,
+      pending_qa_count: 0,
+      precision_pct: 90.0,
+    };
+
+    render(
+      <QueryClientProvider client={qc}>
+        <VeracityAuditPanel logs={[logWithTurns]} />
+        <AnalyticsPanel census={[makeSenior()]} volunteers={[makeVolunteer()]} summary={null} qaMetrics={qaMetrics} />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByText(/Transcripción Completa Turno a Turno \(2\)/i)).toBeTruthy();
+    expect(screen.getByText(/90%/i)).toBeTruthy();
+    expect(screen.getByText(/1 FP · 0 FN/i)).toBeTruthy();
   });
 
   it("renderiza DispatchPanel, AnalyticsPanel, BatchImportModal, ClinicalTrajectoryChart, DailyAgendaPanel y FhirViewerCard", () => {

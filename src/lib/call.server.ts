@@ -46,6 +46,7 @@ export async function runCallAnalysis(
         phone: person.phone || "+34678617031",
         duration_sec: durationSec,
         transcript,
+        is_simulated: true,
       }),
     });
     if (fnRes.ok) {
@@ -54,6 +55,12 @@ export async function runCallAnalysis(
   } catch (err) {
     console.warn("[runCallAnalysis] Edge Function fallback:", err);
   }
+
+  const transcriptTurns = data.lines.map((l, idx) => ({
+    role: l.who === "oye" ? ("agent" as const) : ("user" as const),
+    timeSec: idx * 12 + 2,
+    text: l.text,
+  }));
 
   const nivel = reportObj?.nivel_alerta || "VERDE";
   const mood: CallAnalysis["mood"] =
@@ -89,6 +96,9 @@ export async function runCallAnalysis(
     activar_protocolo_voy_yo: needsHuman,
     acepta_llamada: true,
     acepta_llamadas_diarias: true,
+    is_simulated: true,
+    analyzer_model: reportObj?.auditoria_veracidad?.analyzer_model || "simulation",
+    transcript_turns: transcriptTurns,
     motivo: summary,
     report: reportObj,
   });

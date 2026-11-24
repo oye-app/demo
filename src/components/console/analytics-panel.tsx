@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Clock, Download, MapPin, Pill, ShieldCheck, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Clock, Download, FileCheck2, MapPin, Pill, ShieldCheck, TrendingUp } from "lucide-react";
 import { B2BModeSelector } from "@/components/b2b-meeting-panel";
 import {
   buildConsoleCsvExport,
@@ -6,6 +6,7 @@ import {
   computeDistrictCoverage,
   type ConsoleCensusRow,
   type ConsoleCohortSummary,
+  type ConsoleQaMetrics,
   type ConsoleVolunteerRow,
 } from "@/lib/console";
 
@@ -13,10 +14,12 @@ export function AnalyticsPanel({
   census,
   volunteers,
   summary,
+  qaMetrics = null,
 }: {
   census: ConsoleCensusRow[];
   volunteers: ConsoleVolunteerRow[];
   summary: ConsoleCohortSummary | null;
+  qaMetrics?: ConsoleQaMetrics | null;
 }) {
   const coverage = computeDistrictCoverage(census, volunteers);
   const economics = computeCohortUnitEconomics(summary, census.length);
@@ -202,10 +205,59 @@ export function AnalyticsPanel({
           </div>
 
           <p className="text-[11px] text-muted-foreground">
-            Nota operativa: al activar llamada adaptativa de ~90 s cuando un mayor acumula 3+ días consecutivos en VERDE (`call_mode_hint`), el consumo de minutos baja automáticamente sin reducir la sensación de cercanía.
+            Nota operativa: al activar llamada adaptativa de ~90 s cuando un mayor acumula 3+ días consecutivos en VERDE (`call_mode_hint`), el consumo de minutos baja automáticamente sin reducir la sensación de cercanía. Las cifras económicas son modelos de referencia del benchmark.
           </p>
         </section>
       </div>
+
+      {/* Clinical Veracity & Human QA Audit Card */}
+      <section className="rounded-2xl border bg-card p-5 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-foreground">
+              <FileCheck2 className="size-4 text-primary" />
+              Auditoría de Veracidad Clínica & Control de Calidad Humano (QA)
+            </h3>
+            <p className="text-[11px] text-muted-foreground">
+              Trazabilidad real de motores de análisis (`GPT-4o + Citas Verificadas` vs `Reglas Deterministas`), exclusión de simulaciones y tasa de precisión validada en `/consola`.
+            </p>
+          </div>
+          {qaMetrics && qaMetrics.llm_calls_count === 0 && qaMetrics.total_live_calls > 0 && (
+            <span className="rounded-full bg-warning/20 px-3 py-1 text-[11px] font-bold text-foreground">
+              `OPENAI_API_KEY` no activa aún en Supabase Secrets (usando motor determinista)
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+          <div className="rounded-xl border bg-background/70 p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">Llamadas Reales vs Simuladas</span>
+            <span className="text-lg font-black">
+              {qaMetrics?.total_live_calls ?? 0} reales · {qaMetrics?.simulated_count ?? 0} sim
+            </span>
+          </div>
+          <div className="rounded-xl border bg-background/70 p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">Motor GPT-4o Verificado</span>
+            <span className="text-lg font-black text-primary">
+              {qaMetrics?.llm_calls_count ?? 0} LLM · {qaMetrics?.deterministic_count ?? 0} reglas
+            </span>
+          </div>
+          <div className="rounded-xl border bg-background/70 p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">Tasa Precisión QA Humana</span>
+            <span className="text-lg font-black text-success">
+              {qaMetrics?.precision_pct !== null && qaMetrics?.precision_pct !== undefined
+                ? `${qaMetrics.precision_pct}%`
+                : "Sin auditar aún"}
+            </span>
+          </div>
+          <div className="rounded-xl border bg-background/70 p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">Incidencias QA Reportadas</span>
+            <span className="text-lg font-black">
+              {qaMetrics ? `${qaMetrics.false_positive_count} FP · ${qaMetrics.false_negative_count} FN` : "0 FP · 0 FN"}
+            </span>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

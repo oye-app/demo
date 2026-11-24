@@ -3,6 +3,16 @@
 -- 2) ngo_command_console_and_multi_org
 -- 3) ngo_console_cohort_summary
 -- 4) ngo_console_excellence_pack
+-- 5) clinical_veracity_and_audit_trail
+
+ALTER TABLE public.call_logs
+  ADD COLUMN IF NOT EXISTS transcript_turns jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS analyzer_model text NOT NULL DEFAULT 'deterministic_legacy',
+  ADD COLUMN IF NOT EXISTS is_simulated boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS qa_status text NOT NULL DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS qa_note text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS qa_reviewed_by text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS qa_reviewed_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS public.organizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

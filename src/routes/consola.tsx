@@ -47,6 +47,7 @@ import { ClinicalTrajectoryChart } from "@/components/console/clinical-trajector
 import { DossierTimelinePanel } from "@/components/console/dossier-timeline";
 import { DailyAgendaPanel } from "@/components/console/daily-agenda-panel";
 import { FhirViewerCard } from "@/components/console/fhir-viewer-card";
+import { VeracityAuditPanel } from "@/components/console/veracity-audit-panel";
 import { meQuery } from "@/lib/auth";
 import { demoAccess } from "@/lib/demo.functions";
 import { useAllCallLogs } from "@/lib/call-logs";
@@ -61,6 +62,7 @@ import {
   useCommunityResources,
   useConsoleCensus,
   useConsoleCohortSummary,
+  useConsoleQaMetrics,
   useConsoleRealtimeSync,
   useConsoleVolunteers,
   useIsConsoleOperator,
@@ -85,7 +87,7 @@ export const Route = createFileRoute("/consola")({
 });
 
 type ConsoleTab = "triaje" | "agenda" | "censo" | "voluntarios" | "impacto";
-type DetailTab = "resumen" | "curva" | "bitacora";
+type DetailTab = "resumen" | "curva" | "bitacora" | "auditoria";
 
 function ConsoleRoute() {
   const qc = useQueryClient();
@@ -377,6 +379,7 @@ function ConsoleWorkspace({
   const { data: census = [], isPending: loadingCensus } = useConsoleCensus(!!isOperator);
   const { data: volunteers = [] } = useConsoleVolunteers(!!isOperator);
   const { data: summary = null } = useConsoleCohortSummary(!!isOperator);
+  const { data: qaMetrics = null } = useConsoleQaMetrics(!!isOperator);
   const { data: org } = useQuery({
     queryKey: ["console", "org"],
     enabled: !!isOperator,
@@ -670,7 +673,7 @@ function ConsoleWorkspace({
             <VolunteersNetworkView census={census} volunteers={volunteers} />
           ) : (
             <div className="space-y-6">
-              <AnalyticsPanel census={census} volunteers={volunteers} summary={summary} />
+              <AnalyticsPanel census={census} volunteers={volunteers} summary={summary} qaMetrics={qaMetrics} />
               <FhirViewerCard census={census} />
             </div>
           )}
@@ -1050,6 +1053,7 @@ function SeniorCommandDetail({
               ["resumen", "Resumen, Informe & Despacho"],
               ["curva", `Curva Clínica & Memoria (${logs.filter((l) => l.status === "completada").length})`],
               ["bitacora", "Bitácora & Prescripción Social"],
+              ["auditoria", "Auditoría & Transcripción QA"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -1087,8 +1091,10 @@ function SeniorCommandDetail({
         </div>
       ) : detailTab === "curva" ? (
         <ClinicalTrajectoryChart seniorName={senior.name} logs={logs} />
-      ) : (
+      ) : detailTab === "bitacora" ? (
         <DossierTimelinePanel senior={senior} logs={logs} />
+      ) : (
+        <VeracityAuditPanel logs={logs} />
       )}
 
       <SeniorEditModal senior={senior} open={editOpen} onClose={() => setEditOpen(false)} />
