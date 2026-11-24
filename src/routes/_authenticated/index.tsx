@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, useEffect } from "react";
 import {
+  Building2,
   ChevronRight,
   ChevronLeft,
   ClipboardList,
@@ -628,12 +629,20 @@ function NgoHome() {
   const list = tab === "open" ? open : tab === "accepted" ? accepted : visited;
   return (
     <>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div>
           <h1 className="text-3xl font-extrabold">Panel de coordinación</h1>
           <p className="text-xs font-semibold text-muted-foreground">Asociación y Red de Cuidados Comunitarios</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            to="/consola"
+            aria-label="Abrir Consola Web de escritorio"
+            className="inline-flex h-11 items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-bold text-primary-foreground shadow-sm hover:bg-primary/90"
+          >
+            <Building2 className="size-4" />
+            <span>Consola Web</span>
+          </Link>
           <Link
             to="/admin"
             aria-label="Administrar datos"

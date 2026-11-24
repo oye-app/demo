@@ -15,6 +15,7 @@ import { Route as BienvenidaRouteImport } from './routes/bienvenida'
 import { Route as RecomendarRouteImport } from './routes/recomendar'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAvisosRouteImport } from './routes/_authenticated/avisos'
+import { Route as AuthenticatedConsolaRouteImport } from './routes/_authenticated/consola'
 import { Route as AuthenticatedHistorialRouteImport } from './routes/_authenticated/historial'
 import { Route as AuthenticatedLlamadaRouteImport } from './routes/_authenticated/llamada'
 import { Route as AuthenticatedPerfilRouteImport } from './routes/_authenticated/perfil'
@@ -50,6 +51,11 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
 const AuthenticatedAvisosRoute = AuthenticatedAvisosRouteImport.update({
   id: '/avisos',
   path: '/avisos',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedConsolaRoute = AuthenticatedConsolaRouteImport.update({
+  id: '/consola',
+  path: '/consola',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedHistorialRoute = AuthenticatedHistorialRouteImport.update({
@@ -94,6 +100,7 @@ export interface FileRoutesByFullPath {
   '/bienvenida': typeof BienvenidaRoute
   '/recomendar': typeof RecomendarRoute
   '/avisos': typeof AuthenticatedAvisosRoute
+  '/consola': typeof AuthenticatedConsolaRoute
   '/historial': typeof AuthenticatedHistorialRoute
   '/llamada': typeof AuthenticatedLlamadaRoute
   '/perfil': typeof AuthenticatedPerfilRoute
@@ -107,6 +114,7 @@ export interface FileRoutesByTo {
   '/bienvenida': typeof BienvenidaRoute
   '/recomendar': typeof RecomendarRoute
   '/avisos': typeof AuthenticatedAvisosRoute
+  '/consola': typeof AuthenticatedConsolaRoute
   '/historial': typeof AuthenticatedHistorialRoute
   '/llamada': typeof AuthenticatedLlamadaRoute
   '/perfil': typeof AuthenticatedPerfilRoute
@@ -123,6 +131,7 @@ export interface FileRoutesById {
   '/bienvenida': typeof BienvenidaRoute
   '/recomendar': typeof RecomendarRoute
   '/_authenticated/avisos': typeof AuthenticatedAvisosRoute
+  '/_authenticated/consola': typeof AuthenticatedConsolaRoute
   '/_authenticated/historial': typeof AuthenticatedHistorialRoute
   '/_authenticated/llamada': typeof AuthenticatedLlamadaRoute
   '/_authenticated/perfil': typeof AuthenticatedPerfilRoute
@@ -140,6 +149,7 @@ export interface FileRouteTypes {
     | '/bienvenida'
     | '/recomendar'
     | '/avisos'
+    | '/consola'
     | '/historial'
     | '/llamada'
     | '/perfil'
@@ -153,6 +163,7 @@ export interface FileRouteTypes {
     | '/bienvenida'
     | '/recomendar'
     | '/avisos'
+    | '/consola'
     | '/historial'
     | '/llamada'
     | '/perfil'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '/bienvenida'
     | '/recomendar'
     | '/_authenticated/avisos'
+    | '/_authenticated/consola'
     | '/_authenticated/historial'
     | '/_authenticated/llamada'
     | '/_authenticated/perfil'
@@ -232,6 +244,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAvisosRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/consola': {
+      id: '/_authenticated/consola'
+      path: '/consola'
+      fullPath: '/consola'
+      preLoaderRoute: typeof AuthenticatedConsolaRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/historial': {
       id: '/_authenticated/historial'
       path: '/historial'
@@ -286,6 +305,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAvisosRoute: typeof AuthenticatedAvisosRoute
+  AuthenticatedConsolaRoute: typeof AuthenticatedConsolaRoute
   AuthenticatedHistorialRoute: typeof AuthenticatedHistorialRoute
   AuthenticatedLlamadaRoute: typeof AuthenticatedLlamadaRoute
   AuthenticatedPerfilRoute: typeof AuthenticatedPerfilRoute
@@ -295,6 +315,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAvisosRoute: AuthenticatedAvisosRoute,
+  AuthenticatedConsolaRoute: AuthenticatedConsolaRoute,
   AuthenticatedHistorialRoute: AuthenticatedHistorialRoute,
   AuthenticatedLlamadaRoute: AuthenticatedLlamadaRoute,
   AuthenticatedPerfilRoute: AuthenticatedPerfilRoute,

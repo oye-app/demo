@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Bell, ChevronRight, Heart, LogOut, Settings2, UserRound } from "lucide-react";
+import { Bell, Building2, ChevronRight, Heart, LogOut, Settings2, UserRound } from "lucide-react";
 import { BigButton, Screen } from "@/components/oye";
 import { usePeople } from "@/lib/people";
 import { PERSONAS, useMe, type Persona } from "@/lib/auth";
@@ -69,6 +69,11 @@ function ProfilePage() {
         <Link to="/recomendar" className="flex items-center gap-3 p-4 font-semibold">
           <Heart className="size-5 text-primary" /><span className="flex-1">Recomendar a un vecino mayor</span><ChevronRight className="size-5 text-muted-foreground" />
         </Link>
+        {(profile.persona === "ong" || isAdmin) && (
+          <Link to="/consola" className="flex items-center gap-3 p-4 font-semibold">
+            <Building2 className="size-5 text-primary" /><span className="flex-1">Consola Web de Coordinación</span><ChevronRight className="size-5 text-muted-foreground" />
+          </Link>
+        )}
         {isAdmin && (
           <Link to="/admin" className="flex items-center gap-3 p-4 font-semibold">
             <Settings2 className="size-5 text-primary" /><span className="flex-1">Administración</span><ChevronRight className="size-5 text-muted-foreground" />

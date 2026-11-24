@@ -361,6 +361,45 @@ export type Database = {
         }
         Relationships: []
       }
+      organizations: {
+        Row: {
+          created_at: string
+          daily_rate_eur: number
+          email: string
+          id: string
+          legacy_id: number | null
+          name: string
+          neighborhood: string
+          phone: string
+          sector: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          daily_rate_eur?: number
+          email?: string
+          id?: string
+          legacy_id?: number | null
+          name: string
+          neighborhood?: string
+          phone?: string
+          sector?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          daily_rate_eur?: number
+          email?: string
+          id?: string
+          legacy_id?: number | null
+          name?: string
+          neighborhood?: string
+          phone?: string
+          sector?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       person_links: {
         Row: {
           created_at: string
@@ -557,6 +596,7 @@ export type Database = {
           name: string
           neighborhood: string
           notes: string
+          org_id: string | null
           phone: string
           updated_at: string
         }
@@ -571,6 +611,7 @@ export type Database = {
           name: string
           neighborhood?: string
           notes?: string
+          org_id?: string | null
           phone?: string
           updated_at?: string
         }
@@ -585,6 +626,7 @@ export type Database = {
           name?: string
           neighborhood?: string
           notes?: string
+          org_id?: string | null
           phone?: string
           updated_at?: string
         }
@@ -613,8 +655,10 @@ export type Database = {
           available: boolean
           created_at: string
           id: string
+          is_demo: boolean
           name: string
           neighborhood: string
+          org_id: string | null
           phone: string
           updated_at: string
         }
@@ -622,8 +666,10 @@ export type Database = {
           available?: boolean
           created_at?: string
           id?: string
+          is_demo?: boolean
           name: string
           neighborhood?: string
+          org_id?: string | null
           phone?: string
           updated_at?: string
         }
@@ -631,8 +677,10 @@ export type Database = {
           available?: boolean
           created_at?: string
           id?: string
+          is_demo?: boolean
           name?: string
           neighborhood?: string
+          org_id?: string | null
           phone?: string
           updated_at?: string
         }
@@ -678,6 +726,134 @@ export type Database = {
         Returns: boolean
       }
       is_ong: { Args: { _uid: string }; Returns: boolean }
+      is_console_operator: { Args: { _uid?: string }; Returns: boolean }
+      operator_is_demo_scope: { Args: { _uid?: string }; Returns: boolean }
+      console_batch_upsert_seniors: {
+        Args: { _rows: Json }
+        Returns: { inserted_count: number; updated_count: number }[]
+      }
+      console_census_snapshot: {
+        Args: never
+        Returns: {
+          senior_id: string
+          name: string
+          age: number | null
+          phone: string
+          neighborhood: string
+          family_contact: string
+          active: boolean
+          notes: string
+          is_demo: boolean
+          key_contact_name: string
+          key_contact_phone: string
+          meds: string
+          appointments: string
+          birthday: string
+          schedule_active: boolean
+          schedule_call_hour: number | null
+          schedule_days: number[] | null
+          schedule_last_run_on: string | null
+          schedule_last_error: string
+          active_alert_id: string | null
+          active_alert_status: string | null
+          active_alert_mood: string | null
+          active_alert_need: string | null
+          active_alert_created_at: string | null
+          active_alert_volunteer_id: string | null
+          active_alert_volunteer_name: string | null
+          active_alert_summary: string | null
+          active_alert_memory_note: string | null
+          active_alert_signals: string[] | null
+          latest_call_id: string | null
+          latest_call_status: string | null
+          latest_call_at: string | null
+          latest_nivel_alerta: string | null
+          latest_global_pct: number | null
+          latest_duracion_seg: number | null
+          latest_headline: string
+          latest_summary: string
+          latest_ucla_score: number | null
+          latest_yesavage_score: number | null
+          latest_adherencia: string
+          latest_vocal_estado: string
+          latest_riqueza_lexica: number | null
+          latest_palabras_resp: number | null
+          latest_latencia_seg: number | null
+          latest_tendencia: string
+          latest_anillo: string
+          latest_cita: string
+          calls_7d: number
+          green_7d: number
+          amber_red_7d: number
+          avg_global_pct_7d: number | null
+          prev_global_pct: number | null
+          visits_30d: number
+        }[]
+      }
+      console_cohort_summary: {
+        Args: never
+        Returns: {
+          total_seniors: number
+          active_schedules: number
+          paused_schedules: number
+          open_alerts: number
+          no_answer_open: number
+          dispatched_active: number
+          calls_30d: number
+          green_calls_30d: number
+          filter_green_pct: number | null
+          visits_30d: number
+          avg_dispatch_min: number | null
+          avg_global_pct_30d: number | null
+          avg_ucla_30d: number | null
+          avg_yesavage_30d: number | null
+          med_confirmed_30d: number
+          med_evaluated_30d: number
+          avg_riqueza_lexica_30d: number | null
+          silent_deterioration_count: number
+        }[]
+      }
+      console_dispatch_volunteer: {
+        Args: {
+          _alert_id: string
+          _volunteer_id?: string | null
+          _volunteer_name?: string
+          _dispatch_note?: string
+        }
+        Returns: boolean
+      }
+      console_reopen_alert: {
+        Args: { _alert_id: string }
+        Returns: boolean
+      }
+      console_toggle_schedule_pause: {
+        Args: { _senior_id: string; _paused: boolean; _call_hour?: number }
+        Returns: boolean
+      }
+      console_upsert_volunteer: {
+        Args: {
+          _id?: string | null
+          _name?: string
+          _phone?: string
+          _neighborhood?: string
+          _available?: boolean
+        }
+        Returns: string | null
+      }
+      console_volunteers_overview: {
+        Args: never
+        Returns: {
+          id: string
+          name: string
+          phone: string
+          neighborhood: string
+          available: boolean
+          source: string
+          active_visits: number
+          completed_30d: number
+          last_visit_at: string | null
+        }[]
+      }
       manage_person: {
         Args: {
           _age?: number
