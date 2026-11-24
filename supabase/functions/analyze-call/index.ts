@@ -19,6 +19,15 @@ interface PriorCallSummary {
   global_pct: number | null;
   summary: string;
   signals: string[];
+  lexPct?: number | null;
+  avgWords?: number | null;
+}
+
+interface SeniorCareContext {
+  key_contact_name?: string | null;
+  key_contact_phone?: string | null;
+  meds?: string | null;
+  appointments?: string | null;
 }
 
 function parseTranscriptTurns(rawTranscript: string, rawArray?: any[]): Turn[] {
@@ -108,8 +117,9 @@ function analyzeSpanishConversation(params: {
   durationSec: number;
   rawAiReport?: Record<string, any> | null;
   priorCalls?: PriorCallSummary[];
+  seniorCare?: SeniorCareContext | null;
 }) {
-  const { turns, rawTranscript, seniorName, phone, durationSec, rawAiReport, priorCalls = [] } = params;
+  const { turns, rawTranscript, seniorName, phone, durationSec, rawAiReport, priorCalls = [], seniorCare = null } = params;
   const firstName = seniorName.trim().split(/\s+/)[0] || "Carmen";
 
   const userTurns = turns.filter((t) => t.role === "user");
@@ -350,9 +360,48 @@ function analyzeSpanishConversation(params: {
 
   const nivel_alerta: "VERDE" | "AMARILLO" | "ROJO" = isRed ? "ROJO" : isYellow ? "AMARILLO" : "VERDE";
 
-  // 10. Calculate Vocal & Conversational Fluency metrics
-  const userWordCount = userFullText.split(/\s+/).filter(Boolean).length;
-  const avgWordsPerTurn = userTurns.length > 0 ? Math.round(userWordCount / userTurns.length) : 0;
+  // 10. Calculate Vocal & Conversational Fluency + Temporal Biomarkers (zero extra cost)
+  const userWords = userFullText.split(/\s+/).filter(Boolean);
+  const userWordCount = userWords.length;
+  const avgWordsPerTurn = userTurns.length > 0 ? Math.round((userWordCount / userTurns.length) * 10) / 10 : 0;
+  const normalizedLexTokens = userWords
+    .map((w) => w.toLowerCase().replace(/[^a-záéíóúüñ]/gi, ""))
+    .filter((w) => w.length >= 2);
+  const uniqueLexTokens = new Set(normalizedLexTokens);
+  const riquezaLexicaPct =
+    normalizedLexTokens.length > 0
+      ? Math.min(100, Math.round((uniqueLexTokens.size / normalizedLexTokens.length) * 100))
+      : 0;
+
+  const responseLatencies: number[] = [];
+  for (let i = 1; i < turns.length; i++) {
+    const prevT = turns[i - 1];
+    const currT = turns[i];
+    if (
+      prevT.role === "agent" &&
+      currT.role === "user" &&
+      typeof prevT.timeSec === "number" &&
+      typeof currT.timeSec === "number"
+    ) {
+      const gap = currT.timeSec - prevT.timeSec;
+      if (gap >= 0 && gap <= 30) {
+        responseLatencies.push(gap);
+      }
+    }
+  }
+  const latenciaRespuestaSeg =
+    responseLatencies.length > 0
+      ? Math.round((responseLatencies.reduce((a, b) => a + b, 0) / responseLatencies.length) * 10) / 10
+      : null;
+
+  const prevLex = priorCalls[0]?.lexPct ?? null;
+  const lexComparativa =
+    prevLex !== null
+      ? riquezaLexicaPct - prevLex <= -12
+        ? `Riqueza léxica desciende ${Math.abs(riquezaLexicaPct - prevLex)} pts respecto a la llamada previa.`
+        : `Fluidez verbal consistente con la llamada anterior (${prevLex}% → ${riquezaLexicaPct}% riqueza léxica).`
+      : "Línea base vocal registrada para seguimiento longitudinal.";
+
   const vocalState: "FLUIDO_ORIENTADO" | "LENTITUD_MONOSILABOS" | "DESORIENTACION_CONFUSION" =
     /no s[eé] d[oó]nde estoy|no me acuerdo de nada|confundid[ao]/i.test(userLower)
       ? "DESORIENTACION_CONFUSION"
@@ -362,7 +411,7 @@ function analyzeSpanishConversation(params: {
 
   const vocalObservation =
     userTurns.length > 0
-      ? `${firstName} realizó ${userTurns.length} intervenciones (${userWordCount} palabras en ${durationSec} s, promedio de ${avgWordsPerTurn} palabras por respuesta). ${
+      ? `${firstName} realizó ${userTurns.length} intervenciones (${userWordCount} palabras en ${durationSec} s, promedio de ${avgWordsPerTurn} pal/respuesta, ${riquezaLexicaPct}% riqueza léxica). ${
           vocalState === "FLUIDO_ORIENTADO"
             ? "Discurso coherente, orientado y con buena fluidez conversacional."
             : vocalState === "LENTITUD_MONOSILABOS"
@@ -579,13 +628,18 @@ function analyzeSpanishConversation(params: {
       ? rawAiReport.activar_protocolo_voy_yo
       : nivel_alerta !== "VERDE";
 
+  const keyHolderLabel =
+    seniorCare?.key_contact_name?.trim()
+      ? `${seniorCare.key_contact_name.trim()}${seniorCare.key_contact_phone?.trim() ? ` (${seniorCare.key_contact_phone.trim()})` : ""}`
+      : null;
+
   const recomendacion_familiar =
     rawAiReport?.recomendacion_familiar ||
     (nivel_alerta === "ROJO"
-      ? `Contactar de inmediato a ${firstName} o acudir al domicilio (avisar a Rosa, vecina con llave, o al 112 si no responde).`
+      ? `Contactar de inmediato a ${firstName} o acudir al domicilio (${keyHolderLabel ? `avisar a ${keyHolderLabel}, o al 112 si no responde` : "avisar al contacto con llave o al 112 si no responde"}).`
       : nivel_alerta === "AMARILLO"
       ? medStatus === "NO_TOMADA" || medStatus === "DUDOSA"
-        ? `Llamar a ${firstName} para recordarle con cariño la toma de su medicación de hoy.`
+        ? `Llamar a ${firstName} para recordarle con cariño la toma de su medicación${seniorCare?.meds ? ` (${seniorCare.meds})` : " de hoy"}.`
         : painMatches.length > 0
         ? `Llamar a ${firstName} hoy para preguntarle cómo sigue de su ${painMatches[0]}.`
         : `Hacerle una llamada familiar o visita breve hoy para acompañarla.`
@@ -687,6 +741,13 @@ function analyzeSpanishConversation(params: {
       indicadores_vocales_cognitivos: {
         estado: vocalState,
         observacion: vocalObservation,
+        biomarcadores: {
+          palabras_totales: userWordCount,
+          palabras_por_respuesta: avgWordsPerTurn,
+          riqueza_lexica_pct: riquezaLexicaPct,
+          latencia_respuesta_seg: latenciaRespuestaSeg,
+          comparativa_previa: lexComparativa,
+        },
       },
     },
     prescripcion_y_derivacion_humana: {
@@ -707,6 +768,7 @@ function analyzeSpanishConversation(params: {
         nivel_alerta === "AMARILLO"
           ? "Llamada o visita cercana de la red familiar/vecinal y paseo acompañado por el barrio."
           : "Mantener seguimiento telefónico diario con OYE y actividades habituales.",
+      contacto_con_llave: keyHolderLabel,
     },
     tendencia_longitudinal,
   };
@@ -847,17 +909,31 @@ Deno.serve(async (req: Request) => {
         : personId;
     const sb = supabaseUrl && serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : null;
 
-    // Fetch last 3 completed calls for longitudinal comparison
+    // Fetch last 3 completed calls + senior_care sheet in parallel
     let priorCalls: PriorCallSummary[] = [];
+    let seniorCare: SeniorCareContext | null = null;
     if (sb && !personId.startsWith("test-only")) {
       try {
-        const { data: histRows } = await sb
-          .from("call_logs")
-          .select("conversation_id, created_at, nivel_alerta, global_pct, motivo, report")
-          .eq("person_id", resolvedPersonId)
-          .eq("status", "completada")
-          .order("created_at", { ascending: false })
-          .limit(4);
+        const [{ data: histRows }, { data: careRow }] = await Promise.all([
+          sb
+            .from("call_logs")
+            .select("conversation_id, created_at, nivel_alerta, global_pct, motivo, report")
+            .eq("person_id", resolvedPersonId)
+            .eq("status", "completada")
+            .order("created_at", { ascending: false })
+            .limit(4),
+          sb
+            .from("senior_care")
+            .select("key_contact_name, key_contact_phone, meds, appointments")
+            .eq("senior_id", resolvedPersonId)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+
+        if (careRow) {
+          seniorCare = careRow;
+        }
 
         if (Array.isArray(histRows)) {
           priorCalls = histRows
@@ -870,6 +946,7 @@ Deno.serve(async (req: Request) => {
                 : Array.isArray(rep.top_badges)
                 ? rep.top_badges
                 : [];
+              const prevBio = rep?.evaluacion_escalas?.indicadores_vocales_cognitivos?.biomarcadores;
               return {
                 created_at: String(r.created_at || ""),
                 nivel_alerta: String(r.nivel_alerta || rep.nivel_alerta || "VERDE"),
@@ -881,6 +958,8 @@ Deno.serve(async (req: Request) => {
                     : null,
                 summary: String(rep.summary || r.motivo || "").slice(0, 220),
                 signals: rawSig.filter((s: unknown) => typeof s === "string").slice(0, 3),
+                lexPct: typeof prevBio?.riqueza_lexica_pct === "number" ? prevBio.riqueza_lexica_pct : null,
+                avgWords: typeof prevBio?.palabras_por_respuesta === "number" ? prevBio.palabras_por_respuesta : null,
               };
             });
         }
@@ -888,6 +967,10 @@ Deno.serve(async (req: Request) => {
         console.warn("[analyze-call] History fetch warning:", histErr);
       }
     }
+
+    const careSheetContext = seniorCare
+      ? `Ficha terapéutica actual:\n- Medicación habitual: ${seniorCare.meds || "No especificada"}\n- Próximas citas: ${seniorCare.appointments || "Ninguna"}\n- Contacto con llave: ${seniorCare.key_contact_name || "No registrado"}`
+      : "";
 
     const priorHistoryContext =
       priorCalls.length > 0
@@ -924,7 +1007,7 @@ Deno.serve(async (req: Request) => {
             },
             {
               role: "user",
-              content: `Persona: ${seniorName}\nDuración: ${durationSec}s\n\nHistorial longitudinal (últimas llamadas completadas):\n${priorHistoryContext}\n\nTranscripción actual:\n${cleanTranscript}`,
+              content: `Persona: ${seniorName}\nDuración: ${durationSec}s\n${careSheetContext ? `\n${careSheetContext}\n` : ""}\nHistorial longitudinal (últimas llamadas completadas):\n${priorHistoryContext}\n\nTranscripción actual:\n${cleanTranscript}`,
             },
           ],
         }),
@@ -951,6 +1034,7 @@ Deno.serve(async (req: Request) => {
       durationSec,
       rawAiReport,
       priorCalls,
+      seniorCare,
     });
 
     // Directly persist the report into public.call_logs using SUPABASE_SERVICE_ROLE_KEY as an immediate guarantee

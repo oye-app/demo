@@ -14,8 +14,11 @@ import {
   MessageSquareQuote,
   Volume2,
   HandHeart,
+  KeyRound,
+  RefreshCw,
 } from "lucide-react";
 import type { CallLogRow } from "@/lib/call-logs";
+import { RETRY_MIN, ESCALATE_ONG_MIN, ESCALATE_FAMILY_MIN } from "@/lib/alerts";
 import { STATUS_MESSAGES } from "@/lib/call-logs";
 import { LongitudinalTrendCard } from "./longitudinal-trend";
 import { B2BWebhookViewer } from "./b2b-webhook-viewer";
@@ -24,6 +27,8 @@ import { B2BExecutivePanel } from "./b2b-meeting-panel";
 interface SituationReportProps {
   log: CallLogRow;
   showExecutiveOnly?: boolean;
+  keyContact?: { name?: string | null; phone?: string | null } | undefined;
+  onRetryCall?: (() => void) | undefined;
 }
 
 const HUMAN_LABELS: Record<string, string> = {
@@ -65,7 +70,12 @@ function formatDuration(sec?: number | null): string | null {
   return `${mins} min ${rem} s`;
 }
 
-export function SituationReportCard({ log, showExecutiveOnly = false }: SituationReportProps) {
+export function SituationReportCard({
+  log,
+  showExecutiveOnly = false,
+  keyContact,
+  onRetryCall,
+}: SituationReportProps) {
   const { status, nivel_alerta, report, duracion_seg } = log;
 
   // 1. Status: in-progress or non-completed states
@@ -139,17 +149,55 @@ export function SituationReportCard({ log, showExecutiveOnly = false }: Situatio
   }
 
   if (status === "no_contesta") {
+    const cleanPhone = keyContact?.phone?.replace(/[^\d+]/g, "") || "";
+    const elapsedMin = Math.max(0, Math.round((Date.now() - new Date(log.created_at).getTime()) / 60000));
+    const retryInMin = Math.max(0, RETRY_MIN - elapsedMin);
+
     return (
-      <div className="rounded-3xl border border-warning/30 bg-muted/60 p-5 shadow-card">
-        <div className="flex items-center gap-3">
-          <PhoneCall className="size-6 text-muted-foreground" />
-          <div>
-            <h3 className="text-lg font-bold text-foreground">Hoy no ha contestado</h3>
+      <div className="rounded-3xl border border-warning/40 bg-warning/10 p-5 shadow-card space-y-3">
+        <div className="flex items-start gap-3">
+          <PhoneCall className="size-6 shrink-0 text-warning-foreground mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-extrabold text-foreground">Hoy no ha contestado</h3>
             <p className="text-xs text-muted-foreground">
               {log.motivo ? `Motivo: ${log.motivo}` : STATUS_MESSAGES.no_contesta.subtitle}
             </p>
           </div>
         </div>
+
+        <div className="rounded-2xl bg-background/85 p-3 text-xs space-y-1.5">
+          <p className="font-bold text-foreground">Protocolo automático de red de seguridad:</p>
+          <p className="text-muted-foreground">
+            • {retryInMin > 0 ? `Rellamada recomendada en ${retryInMin} min` : "Rellamada (+15 min) pendiente"} · Escalado vecinal/ONG a los {ESCALATE_ONG_MIN} min · Contacto con llave a los {ESCALATE_FAMILY_MIN} min.
+          </p>
+          {keyContact?.name && (
+            <div className="flex items-center justify-between gap-2 pt-1 text-primary">
+              <span className="flex items-center gap-1.5 font-bold">
+                <KeyRound className="size-3.5 shrink-0" />
+                Llave: {keyContact.name}
+              </span>
+              {cleanPhone && (
+                <a
+                  href={`tel:${cleanPhone}`}
+                  className="rounded-xl bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground"
+                >
+                  Llamar {keyContact.phone}
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
+        {onRetryCall && (
+          <button
+            type="button"
+            onClick={onRetryCall}
+            className="tap flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-2.5 text-xs font-bold text-primary-foreground"
+          >
+            <RefreshCw className="size-4" />
+            Reintentar llamada ahora
+          </button>
+        )}
       </div>
     );
   }
@@ -426,9 +474,9 @@ export function SituationReportCard({ log, showExecutiveOnly = false }: Situatio
             </div>
           )}
 
-          {/* Vocal / Cognitive Indicators */}
+          {/* Vocal / Cognitive Indicators + Temporal Biomarkers */}
           {report.evaluacion_escalas.indicadores_vocales_cognitivos && (
-            <div className="rounded-2xl bg-muted/40 p-3.5 text-xs">
+            <div className="rounded-2xl bg-muted/40 p-3.5 text-xs space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-bold flex items-center gap-1.5">
                   <Volume2 className="size-3.5 text-primary" /> Fluidez verbal y orientación
@@ -438,8 +486,37 @@ export function SituationReportCard({ log, showExecutiveOnly = false }: Situatio
                 </span>
               </div>
               {report.evaluacion_escalas.indicadores_vocales_cognitivos.observacion && (
-                <p className="mt-1 text-muted-foreground">
+                <p className="text-muted-foreground">
                   {report.evaluacion_escalas.indicadores_vocales_cognitivos.observacion}
+                </p>
+              )}
+              {report.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores && (
+                <div className="grid grid-cols-3 gap-1.5 pt-0.5 text-[11px]">
+                  <div className="rounded-xl bg-background/80 p-2">
+                    <span className="text-muted-foreground block">Pal / respuesta</span>
+                    <span className="font-bold text-foreground">
+                      {report.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores.palabras_por_respuesta}
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-background/80 p-2">
+                    <span className="text-muted-foreground block">Riqueza léxica</span>
+                    <span className="font-bold text-foreground">
+                      {report.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores.riqueza_lexica_pct}%
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-background/80 p-2">
+                    <span className="text-muted-foreground block">Latencia media</span>
+                    <span className="font-bold text-foreground">
+                      {report.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores.latencia_respuesta_seg != null
+                        ? `${report.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores.latencia_respuesta_seg} s`
+                        : "Sin seg."}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {report.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores?.comparativa_previa && (
+                <p className="text-[11px] font-medium text-primary/90">
+                  {report.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores.comparativa_previa}
                 </p>
               )}
             </div>
@@ -467,6 +544,15 @@ export function SituationReportCard({ log, showExecutiveOnly = false }: Situatio
                 {humanize(report.prescripcion_y_derivacion_humana.anillo_derivacion_recomendado)}
               </span>
             </p>
+          )}
+          {report.prescripcion_y_derivacion_humana.contacto_con_llave && (
+            <div className="flex items-center gap-1.5 text-foreground">
+              <KeyRound className="size-3.5 shrink-0 text-primary" />
+              <span>
+                <strong className="font-semibold text-muted-foreground">Contacto con llave: </strong>
+                <span className="font-bold">{report.prescripcion_y_derivacion_humana.contacto_con_llave}</span>
+              </span>
+            </div>
           )}
           {report.prescripcion_y_derivacion_humana.prescripcion_social_barrio && (
             <div className="flex items-start gap-1.5 pt-1 text-primary">

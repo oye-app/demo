@@ -33,6 +33,7 @@ import { addPerson } from "@/lib/person.functions";
 import { useAllCallLogs, useLatestCallLog } from "@/lib/call-logs";
 import { SituationReportCard } from "@/components/situation-report";
 import { B2BModeSelector } from "@/components/b2b-meeting-panel";
+import { FamilyWeeklyDigest } from "@/components/family-weekly-digest";
 
 export const Route = createFileRoute("/_authenticated/")({
   validateSearch: personSearch,
@@ -412,7 +413,23 @@ function CallCta({ label = "Llamar ahora" }: { label?: string }) {
 function FamilyHome({ senior, relation }: { senior: string; relation: string }) {
   const { data = [] } = useAlerts();
   const { sid } = usePerson();
+  const navigate = useNavigate();
   const { data: latestLog } = useLatestCallLog(sid);
+  const { data: care } = useQuery({
+    queryKey: ["care-summary", sid],
+    enabled: !!sid,
+    queryFn: async () => {
+      if (!sid) return null;
+      const { data } = await supabase
+        .from("senior_care")
+        .select("key_contact_name, key_contact_phone, meds, appointments")
+        .eq("senior_id", sid)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+  });
   const [showFullScales, setShowFullScales] = useState(false);
 
   const mine = data.filter((a) => a.senior_id === sid);
@@ -515,7 +532,16 @@ function FamilyHome({ senior, relation }: { senior: string; relation: string }) 
       {/* Render full SituationReportCard when a call log is available */}
       {latestLog ? (
         <div className="space-y-2">
-          <SituationReportCard log={latestLog} showExecutiveOnly={!showFullScales} />
+          <SituationReportCard
+            log={latestLog}
+            showExecutiveOnly={!showFullScales}
+            keyContact={
+              care
+                ? { name: care.key_contact_name, phone: care.key_contact_phone }
+                : undefined
+            }
+            onRetryCall={() => void navigate({ to: "/llamada", search: { sid } })}
+          />
           {latestLog.status === "completada" && (
             <button
               type="button"
@@ -552,6 +578,8 @@ function FamilyHome({ senior, relation }: { senior: string; relation: string }) 
       )}
 
       <WellbeingCard senior={senior} seniorId={sid} compact />
+
+      <FamilyWeeklyDigest seniorName={senior} seniorId={sid} compact />
 
       <Link to="/persona" search={{ sid }} className="tap flex items-center gap-3 rounded-2xl bg-card p-3.5 shadow-card">
         <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10">

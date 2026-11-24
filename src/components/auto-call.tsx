@@ -37,7 +37,13 @@ export function AutoCall({ name, userId, seniorId }: { name: string; userId: str
         <CalendarClock className="size-5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
           <p className="font-bold leading-tight">Llamar a {personDisplayName(name)} cada día</p>
-          <p className="text-xs text-muted-foreground">{on ? `Activo · ${String(hour).padStart(2, "0")}:00 h` : "Programación de llamadas simuladas"}</p>
+          <p className="text-xs text-muted-foreground">
+            {on
+              ? `Activo · ${String(hour).padStart(2, "0")}:00 h (Madrid)`
+              : s
+              ? "En pausa temporal (sin falsas alarmas)"
+              : "Programación diaria desatendida"}
+          </p>
         </div>
         <button role="switch" aria-checked={on} aria-label="Llamada automática" disabled={busy || !name.trim()} onClick={() => save({ active: !on })}
           className={`relative h-8 w-14 shrink-0 rounded-full transition ${on ? "bg-primary" : "bg-muted"}`}>
@@ -45,18 +51,23 @@ export function AutoCall({ name, userId, seniorId }: { name: string; userId: str
         </button>
       </div>
       {on && (
-        <div className="mt-3 flex items-center gap-2 border-t pt-3">
-          <select aria-label="Hora" value={hour} onChange={(e) => save({ call_hour: Number(e.target.value) })}
-            className="h-9 rounded-lg border bg-card px-2 text-sm font-semibold">
-            {Array.from({ length: 14 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}:00</option>)}
-          </select>
-          <div className="flex flex-1 justify-between">
-            {DAYS.map((d, i) => { const n = i + 1; const sel = days.includes(n); return (
-              <button key={d} aria-pressed={sel} aria-label={`Día ${d}`}
-                onClick={() => { const nd = sel ? days.filter((x) => x !== n) : [...days, n].sort(); if (nd.length) save({ days: nd }); }}
-                className={`tap size-10 rounded-full text-sm font-bold ${sel ? "bg-primary text-primary-foreground" : "bg-card text-foreground shadow-card"}`}>{d}</button>
-            ); })}
+        <div className="mt-3 space-y-2 border-t pt-3">
+          <div className="flex items-center gap-2">
+            <select aria-label="Hora" value={hour} onChange={(e) => save({ call_hour: Number(e.target.value) })}
+              className="h-9 rounded-lg border bg-card px-2 text-sm font-semibold">
+              {Array.from({ length: 14 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}:00</option>)}
+            </select>
+            <div className="flex flex-1 justify-between">
+              {DAYS.map((d, i) => { const n = i + 1; const sel = days.includes(n); return (
+                <button key={d} aria-pressed={sel} aria-label={`Día ${d}`}
+                  onClick={() => { const nd = sel ? days.filter((x) => x !== n) : [...days, n].sort(); if (nd.length) save({ days: nd }); }}
+                  className={`tap size-10 rounded-full text-sm font-bold ${sel ? "bg-primary text-primary-foreground" : "bg-card text-foreground shadow-card"}`}>{d}</button>
+              ); })}
+            </div>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            Desmarca días concretos o apaga el interruptor en vacaciones/hospitalización para evitar avisos por ausencia.
+          </p>
         </div>
       )}
       {s?.last_error && on && <p className="mt-2 text-xs font-semibold text-destructive">Última llamada automática: {s.last_error}</p>}

@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { buildLastCallMemory } from "@/lib/call-memory";
+import { buildLastCallMemory, buildOutboundCallContext } from "@/lib/call-memory";
 import { computeLongitudinalMetrics } from "@/components/longitudinal-trend";
 import { B2BModeSelector } from "@/components/b2b-meeting-panel";
 import { SituationReportCard } from "@/components/situation-report";
+import { buildWeeklyFamilyDigestText } from "@/components/family-weekly-digest";
 import { setB2BMode } from "@/lib/b2b-mode";
 import type { CallLogRow } from "@/lib/call-logs";
 
@@ -73,6 +74,28 @@ describe("buildLastCallMemory", () => {
     expect(res.last_alert_level).toBe("AMARILLO");
     expect(res.last_call_memory).toContain("Ayer mencionó dolor leve de rodilla.");
     expect(res.last_call_memory).toContain("Señales previas: Molestia en rodilla, Buen descanso.");
+  });
+
+  it("builds enriched outbound context with care sheet, green streak, and adaptive duration hint", () => {
+    const ctx = buildOutboundCallContext({
+      recentCompleted: [
+        { nivel_alerta: "VERDE", motivo: "Todo bien ayer" },
+        { nivel_alerta: "VERDE", motivo: "Bien" },
+        { nivel_alerta: "VERDE", motivo: "Bien" },
+      ],
+      seniorCare: {
+        meds: "Enalapril 10mg por la mañana",
+        appointments: "Centro de Salud Jueves 10:30",
+        birthday: "14 de marzo",
+        key_contact_name: "Rosa (vecina)",
+        key_contact_phone: "+34 678 617 031",
+      },
+    });
+    expect(ctx.green_streak).toBe(3);
+    expect(ctx.call_mode_hint).toBe("charla_breve_90s");
+    expect(ctx.medications).toBe("Enalapril 10mg por la mañana");
+    expect(ctx.appointments).toBe("Centro de Salud Jueves 10:30");
+    expect(ctx.key_contact).toBe("Rosa (vecina) · +34 678 617 031");
   });
 });
 
@@ -146,5 +169,23 @@ describe("B2B meeting selector and webhook payload viewer", () => {
 
     unmount();
     setB2BMode("standard");
+  });
+
+  it("renders key holder safety protocol on no_contesta and generates weekly family digest", () => {
+    const missedLog = mockLog({ status: "no_contesta", nivel_alerta: null, global_pct: null, report: null });
+    render(
+      <SituationReportCard
+        log={missedLog}
+        keyContact={{ name: "Rosa (vecina 2.º)", phone: "+34 678 617 031" }}
+        onRetryCall={() => {}}
+      />
+    );
+    expect(screen.getByText(/Llave: Rosa \(vecina 2\.º\)/)).toBeInTheDocument();
+    expect(screen.getByText("Reintentar llamada ahora")).toBeInTheDocument();
+
+    const digest = buildWeeklyFamilyDigestText("Carmen", [mockLog({})]);
+    expect(digest).toContain("Resumen OYE de Carmen");
+    expect(digest).toContain("Bienestar medio: 68%");
+    expect(digest).toContain("Me costó dormirme anoche.");
   });
 });

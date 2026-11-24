@@ -142,8 +142,12 @@ function B2BExecutivePanelView({
             </span>
           </div>
           <div className="rounded-xl bg-background/85 p-2.5">
-            <span className="block text-[10px] font-semibold text-muted-foreground">Fluidez Vocal / Cognitiva</span>
-            <span className="font-bold text-foreground">{vocal?.estado ?? "FLUIDO_ORIENTADO"}</span>
+            <span className="block text-[10px] font-semibold text-muted-foreground">Fluidez & Biomarcadores</span>
+            <span className="font-bold text-foreground">
+              {vocal?.biomarcadores
+                ? `${vocal.biomarcadores.riqueza_lexica_pct}% léxico · ${vocal.biomarcadores.palabras_por_respuesta} pal/resp`
+                : vocal?.estado ?? "FLUIDO_ORIENTADO"}
+            </span>
           </div>
           <div className="rounded-xl bg-background/85 p-2.5">
             <span className="block text-[10px] font-semibold text-muted-foreground">Filtro Sin Derivación</span>

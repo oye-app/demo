@@ -12,6 +12,7 @@ import { lonelyLabel, timeAgo, useAlerts } from "@/lib/alerts";
 import { useAllCallLogs } from "@/lib/call-logs";
 import { supabase } from "@/integrations/supabase/client";
 import { personDisplayName } from "@/lib/person-presentation";
+import { FamilyWeeklyDigest } from "@/components/family-weekly-digest";
 
 export const Route = createFileRoute("/_authenticated/persona")({
   validateSearch: personSearch,
@@ -197,7 +198,7 @@ function Agenda({ name, seniorId }: { name: string; seniorId: string }) {
   );
 }
 
-function Loneliness({ name, seniorId }: { name: string; seniorId?: string }) {
+function Loneliness({ name, seniorId }: { name: string; seniorId?: string | undefined }) {
   const { data: callLogs = [] } = useAllCallLogs(seniorId);
   const { data: alerts = [] } = useAlerts();
 
@@ -277,6 +278,7 @@ function Loneliness({ name, seniorId }: { name: string; seniorId?: string }) {
           La IA la calcula de forma orientativa en cada llamada escuchando cómo habla {name}. Escala UCLA-3 (3 a 9): 3–5 sin riesgo de soledad; 6–9 requiere mayor acompañamiento.
         </span>
       </p>
+      <FamilyWeeklyDigest seniorName={name} seniorId={seniorId} logs={callLogs} />
     </div>
   );
 }

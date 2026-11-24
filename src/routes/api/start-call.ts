@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { buildLastCallMemory } from "@/lib/call-memory";
+import { buildOutboundCallContext } from "@/lib/call-memory";
 
 const requestSchema = z.object({
   person_id: z.string().trim().min(1),
@@ -36,26 +36,34 @@ export const Route = createFileRoute("/api/start-call")({
           return Response.json({ error: "Persona no encontrada" }, { status: 404 });
         }
 
-        // Load relation
-        const { data: link } = await supabaseAdmin
-          .from("person_links")
-          .select("relation")
-          .eq("senior_id", personId)
-          .maybeSingle();
+        // Load relation, recent completed calls, and care sheet in parallel
+        const [{ data: link }, { data: recentCompleted }, { data: seniorCare }] = await Promise.all([
+          supabaseAdmin
+            .from("person_links")
+            .select("relation")
+            .eq("senior_id", personId)
+            .maybeSingle(),
+          supabaseAdmin
+            .from("call_logs")
+            .select("nivel_alerta, global_pct, motivo, created_at, report")
+            .eq("person_id", personId)
+            .eq("status", "completada")
+            .order("created_at", { ascending: false })
+            .limit(3),
+          supabaseAdmin
+            .from("senior_care")
+            .select("key_contact_name, key_contact_phone, meds, appointments, birthday")
+            .eq("senior_id", personId)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
 
         const relationship = link?.relation || "Familiar";
-
-        // Load latest completed call for longitudinal continuity ("OYE se acuerda")
-        const { data: lastCompleted } = await supabaseAdmin
-          .from("call_logs")
-          .select("nivel_alerta, global_pct, motivo, created_at, report")
-          .eq("person_id", personId)
-          .eq("status", "completada")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        const { last_call_memory, last_alert_level } = buildLastCallMemory(lastCompleted);
+        const outboundContext = buildOutboundCallContext({
+          recentCompleted: recentCompleted ?? [],
+          seniorCare: seniorCare ?? null,
+        });
 
         // Format phone to E.164 without spaces
         let rawPhone = (senior.phone || "").replace(/[^\d+]/g, "");
@@ -78,8 +86,7 @@ export const Route = createFileRoute("/api/start-call")({
           phone: rawPhone,
           age: senior.age ?? null,
           relationship,
-          last_call_memory,
-          last_alert_level,
+          ...outboundContext,
         };
 
         const makeUrl =

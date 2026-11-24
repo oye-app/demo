@@ -63,6 +63,13 @@ export type SituationReport = {
     indicadores_vocales_cognitivos?: {
       estado: "FLUIDO_ORIENTADO" | "LENTITUD_MONOSILABOS" | "DESORIENTACION_CONFUSION" | string;
       observacion: string;
+      biomarcadores?: {
+        palabras_totales: number;
+        palabras_por_respuesta: number;
+        riqueza_lexica_pct: number;
+        latencia_respuesta_seg: number | null;
+        comparativa_previa?: string;
+      };
     };
   };
   prescripcion_y_derivacion_humana?: {
@@ -75,6 +82,7 @@ export type SituationReport = {
       | string;
     mensaje_sms_alerta: string;
     prescripcion_social_barrio: string;
+    contacto_con_llave?: string | null;
   };
   tendencia_longitudinal?: {
     tendencia: "mejor" | "estable" | "descenso" | "nueva";

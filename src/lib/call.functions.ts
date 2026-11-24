@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { buildLastCallMemory } from "./call-memory";
+import { buildOutboundCallContext } from "./call-memory";
 
 const inputSchema = z.object({
   seniorId: z.string().uuid(),
@@ -74,27 +74,35 @@ export const startCall = createServerFn({ method: "POST" })
       );
     }
 
-    // 3. Fetch relationship from person_links
-    const { data: link } = await context.supabase
-      .from("person_links")
-      .select("relation")
-      .eq("user_id", context.userId)
-      .eq("senior_id", personId)
-      .maybeSingle();
+    // 3. Load relationship, longitudinal call history, and care sheet in parallel
+    const [{ data: link }, { data: recentCompleted }, { data: seniorCare }] = await Promise.all([
+      context.supabase
+        .from("person_links")
+        .select("relation")
+        .eq("user_id", context.userId)
+        .eq("senior_id", personId)
+        .maybeSingle(),
+      context.supabase
+        .from("call_logs")
+        .select("nivel_alerta, global_pct, motivo, created_at, report")
+        .eq("person_id", personId)
+        .eq("status", "completada")
+        .order("created_at", { ascending: false })
+        .limit(3),
+      context.supabase
+        .from("senior_care")
+        .select("key_contact_name, key_contact_phone, meds, appointments, birthday")
+        .eq("senior_id", personId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
     const relationship = link?.relation?.trim() || "Familiar";
-
-    // 3b. Fetch latest completed call for longitudinal continuity ("OYE se acuerda")
-    const { data: lastCompleted } = await context.supabase
-      .from("call_logs")
-      .select("nivel_alerta, global_pct, motivo, created_at, report")
-      .eq("person_id", personId)
-      .eq("status", "completada")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const { last_call_memory, last_alert_level } = buildLastCallMemory(lastCompleted);
+    const outboundContext = buildOutboundCallContext({
+      recentCompleted: recentCompleted ?? [],
+      seniorCare: seniorCare ?? null,
+    });
 
     // 4. Format phone strictly to E.164 without spaces (defaulting to verified +34678617031 if empty)
     let rawPhone = (senior.phone || "+34678617031").replace(/[^\d+]/g, "");
@@ -126,8 +134,7 @@ export const startCall = createServerFn({ method: "POST" })
         phone: targetPhone,
         age: senior.age ?? 84,
         relationship,
-        last_call_memory,
-        last_alert_level,
+        ...outboundContext,
       };
       return fetch(makeWebhookUrl, {
         method: "POST",

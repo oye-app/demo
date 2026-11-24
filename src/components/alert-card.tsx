@@ -1,13 +1,29 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, KeyRound, Phone } from "lucide-react";
 import { AlertTimeline } from "./alert-timeline";
 import { MOOD, NEED, STATUS, escalation, timeAgo, type Alert } from "@/lib/alerts";
 import { personDisplayName } from "@/lib/person-presentation";
 import { PersonAvatar } from "./person-avatar";
 
+function extractKeyHolder(a: Alert): { label: string; tel: string } | null {
+  const candidates = [a.memory_note, ...(a.signals ?? [])].filter(Boolean);
+  for (const text of candidates) {
+    const m = text.match(/Llave:\s*([^·(\n]+)(?:\(([^)]+)\))?/i);
+    if (m) {
+      const name = (m[1] || "").trim();
+      const telRaw = (m[2] || "").replace(/[^\d+]/g, "");
+      if (name || telRaw) {
+        return { label: name || "Contacto con llave", tel: telRaw };
+      }
+    }
+  }
+  return null;
+}
+
 export function AlertCard({ a, actions, showTranscript = true }: { a: Alert; actions?: React.ReactNode; showTranscript?: boolean }) {
   const [open, setOpen] = useState(false);
   const m = MOOD[a.mood as keyof typeof MOOD];
+  const keyHolder = extractKeyHolder(a);
   return (
     <article className="animate-rise rounded-3xl bg-card p-5 shadow-card">
       <div className="flex items-start justify-between gap-3">
@@ -23,6 +39,22 @@ export function AlertCard({ a, actions, showTranscript = true }: { a: Alert; act
       </div>
       {a.summary && <p className="mt-2 text-[0.95rem] leading-snug text-foreground">{a.summary}</p>}
       {a.memory_note && <p className="mt-1.5 text-sm text-muted-foreground">{a.memory_note}</p>}
+      {keyHolder && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-2xl border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+          <span className="flex items-center gap-1.5 font-bold text-foreground">
+            <KeyRound className="size-3.5 shrink-0 text-primary" />
+            Llave: {keyHolder.label}
+          </span>
+          {keyHolder.tel && (
+            <a
+              href={`tel:${keyHolder.tel}`}
+              className="tap inline-flex items-center gap-1 rounded-xl bg-primary px-2.5 py-1 font-bold text-primary-foreground"
+            >
+              <Phone className="size-3" /> Llamar
+            </a>
+          )}
+        </div>
+      )}
       {a.signals.length > 0 && (
         <ul className="mt-3 flex flex-wrap gap-1.5">
           {a.signals.map((s) => <li key={s} className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{s}</li>)}

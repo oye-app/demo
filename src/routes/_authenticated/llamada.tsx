@@ -233,7 +233,10 @@ function Call() {
                   <RefreshCw className={`size-3 ${refreshing ? "animate-spin" : ""}`} /> Actualizar
                 </button>
               </div>
-              <SituationReportCard log={latestLog} />
+              <SituationReportCard
+                log={latestLog}
+                onRetryCall={handleStartRealCall}
+              />
             </div>
           )}
 
@@ -352,7 +355,7 @@ function Call() {
                   <CheckCircle2 className="size-4" /> Llamada finalizada · Informe actualizado en tiempo real
                 </span>
               </div>
-              <SituationReportCard log={activeLog} />
+              <SituationReportCard log={activeLog} onRetryCall={handleStartRealCall} />
             </>
           )}
 

@@ -44,14 +44,38 @@ serve(async (req) => {
       });
     }
 
-    // Load relation
-    const { data: link } = await supabase
-      .from("person_links")
-      .select("relation")
-      .eq("senior_id", person_id)
-      .maybeSingle();
+    // Load relation, recent completed calls, and care sheet in parallel
+    const [{ data: link }, { data: recentCompleted }, { data: seniorCare }] = await Promise.all([
+      supabase
+        .from("person_links")
+        .select("relation")
+        .eq("senior_id", person_id)
+        .maybeSingle(),
+      supabase
+        .from("call_logs")
+        .select("nivel_alerta, global_pct, motivo, created_at, report")
+        .eq("person_id", person_id)
+        .eq("status", "completada")
+        .order("created_at", { ascending: false })
+        .limit(3),
+      supabase
+        .from("senior_care")
+        .select("key_contact_name, key_contact_phone, meds, appointments, birthday")
+        .eq("senior_id", person_id)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
     const relationship = link?.relation || "Familiar";
+    const latest = recentCompleted?.[0] ?? null;
+    const latestRep = latest?.report && typeof latest.report === "object" ? latest.report as Record<string, unknown> : null;
+    const last_call_memory = String(
+      latestRep?.oye_recuerda_insight || latestRep?.nota_memoria || latestRep?.summary || latest?.motivo || "Primera llamada registrada sin incidencias previas."
+    ).slice(0, 420);
+    const last_alert_level = String(latest?.nivel_alerta || latestRep?.nivel_alerta || "VERDE");
+    const green_streak = (recentCompleted ?? []).findIndex((r) => (r.nivel_alerta || "VERDE") !== "VERDE");
+    const resolvedStreak = green_streak === -1 ? (recentCompleted ?? []).length : green_streak;
 
     // Format phone to E.164 without spaces
     let rawPhone = (senior.phone || "").replace(/[^\d+]/g, "");
@@ -71,6 +95,14 @@ serve(async (req) => {
       phone: rawPhone,
       age: senior.age ?? null,
       relationship,
+      last_call_memory,
+      last_alert_level,
+      medications: seniorCare?.meds || "Ninguna especificada",
+      appointments: seniorCare?.appointments || "Sin citas próximas registradas",
+      birthday: seniorCare?.birthday || "",
+      key_contact: [seniorCare?.key_contact_name, seniorCare?.key_contact_phone].filter(Boolean).join(" · "),
+      green_streak: resolvedStreak,
+      call_mode_hint: resolvedStreak >= 3 && last_alert_level === "VERDE" ? "charla_breve_90s" : "seguimiento_cercano_3min",
     };
 
     if (!makeUrl) {
