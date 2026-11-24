@@ -2,6 +2,7 @@
 -- 1) enrich_call_context_and_no_answer_key_holder
 -- 2) ngo_command_console_and_multi_org
 -- 3) ngo_console_cohort_summary
+-- 4) ngo_console_excellence_pack
 
 CREATE TABLE IF NOT EXISTS public.organizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -28,47 +29,31 @@ ALTER TABLE public.volunteers
 ALTER TABLE public.coordinators
   ADD COLUMN IF NOT EXISTS org_id uuid REFERENCES public.organizations(id);
 
-CREATE OR REPLACE FUNCTION public.is_console_operator(_uid uuid DEFAULT auth.uid())
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path TO 'public'
-AS $$
-  SELECT _uid IS NOT NULL AND (
-    public.is_ong(_uid)
-    OR EXISTS (
-      SELECT 1 FROM public.demo_members d
-      WHERE d.user_id = _uid AND d.kind = 'ong'
-    )
-  );
-$$;
+CREATE TABLE IF NOT EXISTS public.care_interventions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  senior_id uuid NOT NULL REFERENCES public.seniors(id) ON DELETE CASCADE,
+  alert_id uuid REFERENCES public.alerts(id) ON DELETE SET NULL,
+  author_id uuid,
+  author_name text NOT NULL DEFAULT 'Coordinación ONG',
+  category text NOT NULL DEFAULT 'nota_coordinacion',
+  ring integer NOT NULL DEFAULT 2,
+  title text NOT NULL,
+  details text NOT NULL DEFAULT '',
+  outcome text NOT NULL DEFAULT 'registrada',
+  is_demo boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
-CREATE OR REPLACE FUNCTION public.operator_is_demo_scope(_uid uuid DEFAULT auth.uid())
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path TO 'public'
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.demo_members d
-    WHERE d.user_id = _uid
-  );
-$$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'organizations'
-      AND policyname = 'Console operators read organizations'
-  ) THEN
-    CREATE POLICY "Console operators read organizations"
-    ON public.organizations
-    FOR SELECT
-    TO authenticated
-    USING (public.is_console_operator(auth.uid()));
-  END IF;
-END $$;
+CREATE TABLE IF NOT EXISTS public.community_resources (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid REFERENCES public.organizations(id) ON DELETE SET NULL,
+  name text NOT NULL,
+  category text NOT NULL DEFAULT 'centro_mayores',
+  neighborhood text NOT NULL DEFAULT 'Chamberí',
+  schedule text NOT NULL DEFAULT '',
+  contact text NOT NULL DEFAULT '',
+  description text NOT NULL DEFAULT '',
+  is_demo boolean NOT NULL DEFAULT false,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);

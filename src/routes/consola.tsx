@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
@@ -6,13 +7,17 @@ import {
   AlertTriangle,
   BarChart3,
   Building2,
+  CalendarClock,
   CalendarOff,
   CheckCircle2,
+  ClipboardEdit,
   Clock,
+  Compass,
   Download,
   FileSpreadsheet,
   HandHeart,
   KeyRound,
+  LogOut,
   MapPin,
   PauseCircle,
   Phone,
@@ -20,9 +25,12 @@ import {
   Pill,
   PlayCircle,
   Plus,
+  Printer,
   Search,
   ShieldAlert,
+  ShieldCheck,
   Smartphone,
+  Sparkles,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,24 +42,34 @@ import { B2BModeSelector } from "@/components/b2b-meeting-panel";
 import { DispatchPanel } from "@/components/console/dispatch-panel";
 import { BatchImportModal } from "@/components/console/batch-import-modal";
 import { AnalyticsPanel } from "@/components/console/analytics-panel";
-import { useMe } from "@/lib/auth";
+import { SeniorEditModal } from "@/components/console/senior-edit-modal";
+import { ClinicalTrajectoryChart } from "@/components/console/clinical-trajectory-chart";
+import { DossierTimelinePanel } from "@/components/console/dossier-timeline";
+import { DailyAgendaPanel } from "@/components/console/daily-agenda-panel";
+import { FhirViewerCard } from "@/components/console/fhir-viewer-card";
+import { meQuery } from "@/lib/auth";
+import { demoAccess } from "@/lib/demo.functions";
 import { useAllCallLogs } from "@/lib/call-logs";
 import { supabase } from "@/integrations/supabase/client";
+import { lovable } from "@/integrations/lovable/index";
 import {
   buildConsoleCsvExport,
   classifyUrgencyTier,
   computeDistrictCoverage,
   computeSlaStatus,
+  computeTodayScheduleCoverage,
+  useCommunityResources,
   useConsoleCensus,
   useConsoleCohortSummary,
   useConsoleRealtimeSync,
   useConsoleVolunteers,
   useIsConsoleOperator,
   type ConsoleCensusRow,
+  type ConsoleVolunteerRow,
   type UrgencyTier,
 } from "@/lib/console";
 
-export const Route = createFileRoute("/_authenticated/consola")({
+export const Route = createFileRoute("/consola")({
   ssr: false,
   head: () => ({
     meta: [
@@ -59,17 +77,302 @@ export const Route = createFileRoute("/_authenticated/consola")({
       {
         name: "description",
         content:
-          "Torre de control de escritorio para ONG, teleasistencia y aseguradoras: triaje por semáforo, biomarcadores, despacho vecinal e impacto clínico.",
+          "Centro de mando desktop para ONG, teleasistencia y aseguradoras: acceso directo, triaje por semáforo, biomarcadores, FHIR R4 y despacho vecinal.",
       },
     ],
   }),
-  component: ConsolePage,
+  component: ConsoleRoute,
 });
 
-type ConsoleTab = "triaje" | "censo" | "voluntarios" | "impacto";
+type ConsoleTab = "triaje" | "agenda" | "censo" | "voluntarios" | "impacto";
+type DetailTab = "resumen" | "curva" | "bitacora";
 
-function ConsolePage() {
-  const { user, profile } = useMe();
+function ConsoleRoute() {
+  const qc = useQueryClient();
+  const { data: me, isPending: loadingMe } = useQuery(meQuery);
+  const demo = useServerFn(demoAccess);
+  const [switchingDemo, setSwitchingDemo] = useState(false);
+
+  async function enterOngDemo() {
+    setSwitchingDemo(true);
+    try {
+      const creds = await demo({ data: { persona: "ong" } }).catch(() => ({
+        email: "ong@demo.oye.app",
+        password: "oye-demo-2026",
+      }));
+      const res = await supabase.auth.signInWithPassword(creds);
+      if (res.error) throw res.error;
+      await qc.invalidateQueries();
+      toast.success("Sesión iniciada en Consola ONG (Ana Torres)");
+    } catch {
+      toast.error("No se pudo abrir la demo ONG. Inténtalo de nuevo.");
+    } finally {
+      setSwitchingDemo(false);
+    }
+  }
+
+  if (loadingMe) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+        <p className="text-sm font-semibold text-muted-foreground">Cargando Consola de Coordinación…</p>
+      </div>
+    );
+  }
+
+  if (!me?.user) {
+    return <ConsoleSignInScreen busyDemo={switchingDemo} onDemoOng={() => void enterOngDemo()} />;
+  }
+
+  return (
+    <ConsoleWorkspace
+      user={{ id: me.user.id, email: me.user.email }}
+      profile={me.profile}
+      busyDemo={switchingDemo}
+      onDemoOng={() => void enterOngDemo()}
+    />
+  );
+}
+
+function ConsoleSignInScreen({
+  busyDemo,
+  onDemoOng,
+}: {
+  busyDemo: boolean;
+  onDemoOng: () => void;
+}) {
+  const qc = useQueryClient();
+  const [mode, setMode] = useState<"in" | "up">("in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    const res =
+      mode === "in"
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({
+            email,
+            password,
+            options: { emailRedirectTo: `${window.location.origin}/consola` },
+          });
+    setBusy(false);
+    if (res.error) {
+      setMsg({
+        ok: false,
+        text: mode === "in" ? "Correo o contraseña incorrectos." : "No se pudo crear la cuenta.",
+      });
+      return;
+    }
+    if (mode === "up" && !res.data.session) {
+      setMsg({
+        ok: true,
+        text: "Hemos enviado un correo de confirmación. Ábrelo y recarga /consola.",
+      });
+      return;
+    }
+    await qc.invalidateQueries();
+  }
+
+  async function socialGoogle() {
+    const r = await lovable.auth.signInWithOAuth("google", {
+      redirect_uri: `${window.location.origin}/consola`,
+    });
+    if (r.error) setMsg({ ok: false, text: "No se pudo iniciar con Google." });
+  }
+
+  return (
+    <div className="min-h-dvh bg-secondary/35 text-foreground flex flex-col">
+      <header className="border-b bg-card px-6 py-3.5">
+        <div className="mx-auto flex max-w-6xl items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-primary">
+              <OyeLogo />
+            </span>
+            <span className="hidden rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary sm:inline-block">
+              Consola Web ONG · Teleasistencia · Aseguradoras
+            </span>
+          </div>
+          <Link
+            to="/bienvenida"
+            className="inline-flex items-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-bold hover:bg-secondary"
+          >
+            <Smartphone className="size-3.5" /> App Móvil Familia / Voluntario
+          </Link>
+        </div>
+      </header>
+
+      <main className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-8 px-6 py-10 lg:grid-cols-[1.15fr_430px]">
+        {/* Enterprise Pitch Column */}
+        <section className="space-y-6">
+          <div className="space-y-3">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-extrabold text-primary">
+              <Building2 className="size-3.5" />
+              Centro de Mando Desktop 360°
+            </span>
+            <h1 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
+              Controla cientos de mayores en un solo panel clínico y vecinal
+            </h1>
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">
+              Diseñado para coordinadoras de ONG, ayuntamientos, operadores de teleasistencia y equipos médicos de aseguradoras: filtra automáticamente los días verdes, prioriza los casos críticos con reloj SLA y despacha voluntarios en un clic.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              [
+                ShieldCheck,
+                "Filtro Silencioso + Triaje SLA",
+                "Separa el ~85% de llamadas verdes para centrar tus horas humanas en alertas ROJO, AMARILLO y «No contesta».",
+              ],
+              [
+                Activity,
+                "Escalas UCLA-3, GDS-5 y Biomarcadores",
+                "Gráfica longitudinal por mayor con riqueza léxica, latencia vocal y alertas de deterioro silencioso.",
+              ],
+              [
+                HandHeart,
+                "Despacho Inteligente & Radar Barrio",
+                "Ranking automático de voluntarios libres cercanos y detección de barrios descubiertos.",
+              ],
+              [
+                Compass,
+                "FHIR R4, CSV Masivo y Prescripción Social",
+                "Importa 500 mayores desde Excel, prescribe recursos de barrio y exporta Bundles HL7 FHIR R4.",
+              ],
+            ].map(([Icon, title, desc]) => {
+              const IconComp = Icon as typeof ShieldCheck;
+              return (
+                <div key={title as string} className="rounded-2xl border bg-card p-4 shadow-sm space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-primary">
+                    <IconComp className="size-4 shrink-0" />
+                    <span>{title as string}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{desc as string}</p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Auth Card */}
+        <section className="rounded-3xl border bg-card p-6 shadow-xl space-y-5">
+          <div className="space-y-1">
+            <h2 className="text-xl font-black text-foreground">Acceso a Consola de Coordinación</h2>
+            <p className="text-xs text-muted-foreground">
+              Entra con tu cuenta corporativa/ONG o abre el entorno demo en 1 clic.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-extrabold text-primary flex items-center gap-1.5">
+                <Sparkles className="size-4" /> Acceso directo Demo Comercial
+              </span>
+              <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+                Sin registro
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={busyDemo}
+              onClick={onDemoOng}
+              className="w-full rounded-xl bg-primary py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
+            >
+              {busyDemo ? "Abriendo consola ONG…" : "Entrar como Coordinación ONG (Ana Torres)"}
+            </button>
+          </div>
+
+          <div className="relative py-1 text-center text-[11px] font-semibold text-muted-foreground">
+            <span className="bg-card px-2">o con tu cuenta de organización</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void socialGoogle()}
+            className="w-full rounded-xl border bg-background py-2.5 text-xs font-bold text-foreground hover:bg-secondary"
+          >
+            Continuar con Google Workspace
+          </button>
+
+          <form onSubmit={(e) => void submit(e)} className="space-y-3 text-xs">
+            <label className="block">
+              <span className="mb-1 block font-bold text-muted-foreground">Correo corporativo</span>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="coordinacion@entidad.org"
+                className="h-10 w-full rounded-xl border bg-background px-3 text-xs"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-bold text-muted-foreground">Contraseña</span>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="h-10 w-full rounded-xl border bg-background px-3 text-xs"
+              />
+            </label>
+
+            {msg && (
+              <p
+                role="alert"
+                className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+                  msg.ok ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"
+                }`}
+              >
+                {msg.text}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded-xl bg-foreground py-2.5 text-xs font-bold text-background hover:opacity-90 disabled:opacity-50"
+            >
+              {busy ? "Verificando…" : mode === "in" ? "Iniciar sesión en Consola" : "Solicitar alta de cuenta"}
+            </button>
+          </form>
+
+          <div className="flex items-center justify-between text-xs pt-1">
+            <button
+              type="button"
+              onClick={() => setMode(mode === "in" ? "up" : "in")}
+              className="font-bold text-primary hover:underline"
+            >
+              {mode === "in" ? "¿Nueva entidad? Crear cuenta" : "Ya tengo cuenta"}
+            </button>
+            <Link to="/admin" className="font-semibold text-muted-foreground hover:text-foreground">
+              Acceso Admin Legacy
+            </Link>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function ConsoleWorkspace({
+  user,
+  profile,
+  busyDemo,
+  onDemoOng,
+}: {
+  user: { id: string; email: string };
+  profile: { full_name: string; persona: string } | null;
+  busyDemo: boolean;
+  onDemoOng: () => void;
+}) {
+  const qc = useQueryClient();
   const { data: isOperator, isPending: checkingAccess } = useIsConsoleOperator();
   const { data: census = [], isPending: loadingCensus } = useConsoleCensus(!!isOperator);
   const { data: volunteers = [] } = useConsoleVolunteers(!!isOperator);
@@ -101,6 +404,14 @@ function ConsolePage() {
     }
   }, [census, selectedId]);
 
+  async function handleSignOut() {
+    await qc.cancelQueries();
+    qc.clear();
+    await supabase.auth.signOut();
+    await qc.invalidateQueries();
+    toast.success("Sesión cerrada");
+  }
+
   if (checkingAccess) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background p-6">
@@ -111,27 +422,36 @@ function ConsolePage() {
 
   if (!isOperator) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <div className="flex min-h-dvh items-center justify-center bg-secondary/30 p-6">
         <div className="max-w-md space-y-4 rounded-3xl border bg-card p-6 text-center shadow-card">
           <Building2 className="mx-auto size-10 text-primary" />
           <h1 className="text-2xl font-black text-foreground">Consola reservada a coordinación ONG / B2B</h1>
           <p className="text-sm text-muted-foreground">
-            Tu sesión actual (<strong>{profile.full_name}</strong> · perfil <code>{profile.persona}</code>) está configurada para la vista móvil. Para explorar el centro de mando completo, entra como coordinación ONG o vuelve a tu vista móvil.
+            Sesión actual: <strong>{profile?.full_name || user.email}</strong> (perfil{" "}
+            <code>{profile?.persona || "sin perfil"}</code>). Puedes volver a tu vista móvil o entrar directamente en el modo Demo ONG.
           </p>
           <div className="flex flex-wrap justify-center gap-2 pt-2">
+            <button
+              type="button"
+              disabled={busyDemo}
+              onClick={onDemoOng}
+              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {busyDemo ? "Abriendo Demo ONG…" : "Cambiar a Demo ONG ahora"}
+            </button>
             <Link
               to="/"
-              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90"
-            >
-              Volver a mi app
-            </Link>
-            <Link
-              to="/bienvenida"
-              search={{ paso: "acceso" }}
               className="rounded-xl border bg-secondary px-4 py-2.5 text-sm font-bold text-foreground hover:bg-secondary/80"
             >
-              Cambiar a perfil ONG
+              Volver a app móvil
             </Link>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="rounded-xl px-4 py-2.5 text-sm font-semibold text-muted-foreground hover:bg-secondary"
+            >
+              Cerrar sesión
+            </button>
           </div>
         </div>
       </div>
@@ -148,6 +468,7 @@ function ConsolePage() {
     { critical: 0, preventive: 0, green: 0, pending: 0, paused: 0 }
   );
 
+  const todayAgenda = computeTodayScheduleCoverage(census);
   const selected = census.find((r) => r.senior_id === selectedId) ?? census[0] ?? null;
 
   function handleExportCsv() {
@@ -168,15 +489,21 @@ function ConsolePage() {
       icon: ShieldAlert,
       badge: counts.critical + counts.preventive,
     },
+    {
+      id: "agenda",
+      label: "Agenda Hoy",
+      icon: CalendarClock,
+      badge: todayAgenda.overdueCount + todayAgenda.pendingCount,
+    },
     { id: "censo", label: "Censo & Escalas", icon: Users, badge: census.length },
-    { id: "voluntarios", label: "Red de Voluntarios", icon: HandHeart, badge: volunteers.length },
-    { id: "impacto", label: "Impacto & B2B", icon: BarChart3 },
+    { id: "voluntarios", label: "Voluntarios & Barrio", icon: HandHeart, badge: volunteers.length },
+    { id: "impacto", label: "Impacto & FHIR", icon: BarChart3 },
   ];
 
   return (
     <div className="min-h-dvh bg-secondary/35 text-foreground">
       {/* Desktop Top Navigation Bar */}
-      <header className="sticky top-0 z-30 border-b bg-card/95 px-4 py-3 backdrop-blur md:px-6">
+      <header className="sticky top-0 z-30 border-b bg-card/95 px-4 py-3 backdrop-blur print:hidden md:px-6">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4">
             <Link to="/consola" className="text-primary">
@@ -187,7 +514,7 @@ function ConsolePage() {
                 {org?.name || "Consola de Coordinación Territorial"}
               </p>
               <p className="text-[11px] font-semibold text-muted-foreground">
-                {org?.neighborhood || "Chamberí"} · Operador: {profile.full_name} ({user.email || "ONG"})
+                {org?.neighborhood || "Chamberí"} · {profile?.full_name || user.email}
               </p>
             </div>
           </div>
@@ -215,16 +542,25 @@ function ConsolePage() {
               className="inline-flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/80"
             >
               <Smartphone className="size-3.5" />
-              Vista móvil
+              App móvil
             </Link>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              aria-label="Cerrar sesión de consola"
+              className="inline-flex items-center gap-1 rounded-xl border bg-background px-2.5 py-2 text-xs font-bold text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              <LogOut className="size-3.5" />
+              Salir
+            </button>
           </div>
         </div>
       </header>
 
       <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-4 py-5 lg:flex-row md:px-6">
         {/* Left Navigation Sidebar */}
-        <aside className="shrink-0 lg:w-60 space-y-4">
-          <nav aria-label="Secciones de la consola" className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-1">
+        <aside className="shrink-0 space-y-4 print:hidden lg:w-60">
+          <nav aria-label="Secciones de la consola" className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = tab === item.id;
@@ -262,19 +598,19 @@ function ConsolePage() {
             <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Pulso en directo</p>
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-destructive font-semibold">
+                <span className="flex items-center gap-1.5 font-semibold text-destructive">
                   <span className="size-2 rounded-full bg-destructive" /> Prioridad Crítica
                 </span>
                 <span className="font-black">{counts.critical}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-warning font-semibold">
+                <span className="flex items-center gap-1.5 font-semibold text-warning">
                   <span className="size-2 rounded-full bg-warning" /> Preventivos
                 </span>
                 <span className="font-black">{counts.preventive}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-success font-semibold">
+                <span className="flex items-center gap-1.5 font-semibold text-success">
                   <span className="size-2 rounded-full bg-success" /> Filtrado Verde IA
                 </span>
                 <span className="font-black">{counts.green}</span>
@@ -313,6 +649,14 @@ function ConsolePage() {
               onSelect={setSelectedId}
               summary={summary}
             />
+          ) : tab === "agenda" ? (
+            <DailyAgendaPanel
+              census={census}
+              onInspect={(id) => {
+                setSelectedId(id);
+                setTab("triaje");
+              }}
+            />
           ) : tab === "censo" ? (
             <CensusTableView
               census={census}
@@ -325,7 +669,10 @@ function ConsolePage() {
           ) : tab === "voluntarios" ? (
             <VolunteersNetworkView census={census} volunteers={volunteers} />
           ) : (
-            <AnalyticsPanel census={census} volunteers={volunteers} summary={summary} />
+            <div className="space-y-6">
+              <AnalyticsPanel census={census} volunteers={volunteers} summary={summary} />
+              <FhirViewerCard census={census} />
+            </div>
           )}
         </main>
       </div>
@@ -343,7 +690,7 @@ function TriageCommandView({
   summary,
 }: {
   census: ConsoleCensusRow[];
-  volunteers: ReturnType<typeof useConsoleVolunteers>["data"] extends (infer T)[] | undefined ? T[] : never;
+  volunteers: ConsoleVolunteerRow[];
   selected: ConsoleCensusRow | null;
   onSelect: (id: string) => void;
   summary: ReturnType<typeof useConsoleCohortSummary>["data"] extends infer S ? S | null : null;
@@ -373,8 +720,7 @@ function TriageCommandView({
 
   return (
     <div className="space-y-4">
-      {/* Silent Green Filter Hero Ribbon */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-card px-4 py-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-card px-4 py-3 shadow-sm print:hidden">
         <div className="flex items-center gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-success/15 text-success">
             <CheckCircle2 className="size-5" />
@@ -386,7 +732,7 @@ function TriageCommandView({
             </p>
             <p className="text-xs text-muted-foreground">
               {summary?.filter_green_pct !== null && summary?.filter_green_pct !== undefined
-                ? `${summary.filter_green_pct}% de las llamadas recientes resueltas en VERDE · Tiempo medio de despacho: ${summary.avg_dispatch_min ?? "—"} min`
+                ? `${summary.filter_green_pct}% de llamadas recientes en VERDE · Despacho medio: ${summary.avg_dispatch_min ?? "—"} min`
                 : "Los casos críticos y sin respuesta suben automáticamente arriba de la cola."}
             </p>
           </div>
@@ -413,10 +759,9 @@ function TriageCommandView({
         </div>
       </div>
 
-      {/* Master-Detail Split Grid */}
-      <div className="grid gap-4 lg:grid-cols-[360px_1fr] xl:grid-cols-[400px_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[350px_1fr] xl:grid-cols-[390px_1fr]">
         {/* Left Queue */}
-        <section className="flex flex-col rounded-3xl border bg-card shadow-sm overflow-hidden">
+        <section className="flex flex-col overflow-hidden rounded-3xl border bg-card shadow-sm print:hidden">
           <div className="border-b p-3">
             <div className="relative">
               <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
@@ -431,11 +776,9 @@ function TriageCommandView({
             </div>
           </div>
 
-          <div className="max-h-[72vh] divide-y overflow-y-auto">
+          <div className="max-h-[74vh] divide-y overflow-y-auto">
             {filtered.length === 0 ? (
-              <p className="p-6 text-center text-xs text-muted-foreground">
-                No hay personas en este filtro ahora mismo.
-              </p>
+              <p className="p-6 text-center text-xs text-muted-foreground">No hay personas en este filtro.</p>
             ) : (
               filtered.map((row) => {
                 const { tier, label } = classifyUrgencyTier(row);
@@ -512,7 +855,7 @@ function TriageCommandView({
           </div>
         </section>
 
-        {/* Right Detail Workspace */}
+        {/* Right Full 360 Dossier Workspace */}
         <section className="min-w-0 space-y-4">
           {selected ? (
             <SeniorCommandDetail senior={selected} volunteers={volunteers} />
@@ -532,11 +875,13 @@ function SeniorCommandDetail({
   volunteers,
 }: {
   senior: ConsoleCensusRow;
-  volunteers: ReturnType<typeof useConsoleVolunteers>["data"] extends (infer T)[] | undefined ? T[] : never;
+  volunteers: ConsoleVolunteerRow[];
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { data: logs = [] } = useAllCallLogs(senior.senior_id);
+  const [detailTab, setDetailTab] = useState<DetailTab>("resumen");
+  const [editOpen, setEditOpen] = useState(false);
   const [pausing, setPausing] = useState(false);
 
   const latestLog = logs[0] ?? null;
@@ -559,7 +904,7 @@ function SeniorCommandDetail({
       );
       await qc.invalidateQueries({ queryKey: ["console"] });
     } catch {
-      toast.error("No se pudo actualizar el estado de la programación.");
+      toast.error("No se pudo actualizar la programación.");
     } finally {
       setPausing(false);
     }
@@ -567,7 +912,6 @@ function SeniorCommandDetail({
 
   return (
     <div className="space-y-4">
-      {/* Expediente Top Bar */}
       <div className="rounded-3xl border bg-card p-5 shadow-sm space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-3.5">
@@ -591,7 +935,25 @@ function SeniorCommandDetail({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <button
+              type="button"
+              onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-bold hover:bg-secondary"
+            >
+              <ClipboardEdit className="size-4 text-primary" />
+              Editar ficha & pauta
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-bold hover:bg-secondary"
+            >
+              <Printer className="size-4 text-muted-foreground" />
+              Imprimir / PDF
+            </button>
+
             <button
               type="button"
               disabled={pausing}
@@ -604,11 +966,11 @@ function SeniorCommandDetail({
             >
               {senior.schedule_active ? (
                 <>
-                  <PauseCircle className="size-4 text-warning" /> Pausar llamadas (Vacaciones)
+                  <PauseCircle className="size-4 text-warning" /> Pausar
                 </>
               ) : (
                 <>
-                  <PlayCircle className="size-4 text-success" /> Reanudar llamadas diarias
+                  <PlayCircle className="size-4 text-success" /> Reanudar
                 </>
               )}
             </button>
@@ -619,22 +981,21 @@ function SeniorCommandDetail({
               className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-sm hover:bg-primary/90"
             >
               <PhoneCall className="size-4" />
-              Llamar ahora con OYE
+              Llamar con OYE
             </button>
           </div>
         </div>
 
-        {/* Clinical Care Context Ribbon */}
         <div className="grid gap-2.5 sm:grid-cols-3">
           <div className="rounded-2xl border bg-background/70 p-3 text-xs">
             <span className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground">
-              <Pill className="size-3.5 text-primary" /> Medicación habitual
+              <Pill className="size-3.5 text-primary" /> Medicación (co-piloto IA)
             </span>
             <p className="mt-1 font-semibold text-foreground">{senior.meds || "No registrada"}</p>
           </div>
           <div className="rounded-2xl border bg-background/70 p-3 text-xs">
             <span className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground">
-              <Activity className="size-3.5 text-primary" /> Cita médica / Agenda
+              <Activity className="size-3.5 text-primary" /> Citas & Agenda
             </span>
             <p className="mt-1 font-semibold text-foreground">{senior.appointments || "Sin citas próximas"}</p>
           </div>
@@ -681,25 +1042,56 @@ function SeniorCommandDetail({
             )}
           </div>
         )}
+
+        {/* Dossier View Tabs */}
+        <div className="flex flex-wrap gap-1.5 border-t pt-3 print:hidden">
+          {(
+            [
+              ["resumen", "Resumen, Informe & Despacho"],
+              ["curva", `Curva Clínica & Memoria (${logs.filter((l) => l.status === "completada").length})`],
+              ["bitacora", "Bitácora & Prescripción Social"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setDetailTab(id)}
+              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-colors ${
+                detailTab === id ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-secondary/80"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Dispatch Panel + Latest Clinical Report */}
-      <DispatchPanel senior={senior} volunteers={volunteers} />
-
-      {latestLog ? (
-        <SituationReportCard
-          log={latestLog}
-          showExecutiveOnly={false}
-          keyContact={{ name: senior.key_contact_name, phone: senior.key_contact_phone }}
-          onRetryCall={() => void navigate({ to: "/llamada", search: { sid: senior.senior_id } })}
-        />
-      ) : (
-        <div className="rounded-3xl border bg-card p-6 text-xs text-muted-foreground">
-          Todavía no hay una llamada analizada para <strong>{senior.name}</strong>. Pulsa «Llamar ahora con OYE» para lanzar su primera llamada de bienvenida.
+      {detailTab === "resumen" ? (
+        <div className="space-y-4">
+          <div className="print:hidden">
+            <DispatchPanel senior={senior} volunteers={volunteers} />
+          </div>
+          {latestLog ? (
+            <SituationReportCard
+              log={latestLog}
+              showExecutiveOnly={false}
+              keyContact={{ name: senior.key_contact_name, phone: senior.key_contact_phone }}
+              onRetryCall={() => void navigate({ to: "/llamada", search: { sid: senior.senior_id } })}
+            />
+          ) : (
+            <div className="rounded-3xl border bg-card p-6 text-xs text-muted-foreground">
+              Todavía no hay una llamada analizada para <strong>{senior.name}</strong>.
+            </div>
+          )}
+          {logs.length > 0 && <FamilyWeeklyDigest seniorName={senior.name} logs={logs} />}
         </div>
+      ) : detailTab === "curva" ? (
+        <ClinicalTrajectoryChart seniorName={senior.name} logs={logs} />
+      ) : (
+        <DossierTimelinePanel senior={senior} logs={logs} />
       )}
 
-      {logs.length > 0 && <FamilyWeeklyDigest seniorName={senior.name} logs={logs} />}
+      <SeniorEditModal senior={senior} open={editOpen} onClose={() => setEditOpen(false)} />
     </div>
   );
 }
@@ -760,7 +1152,7 @@ function CensusTableView({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2 flex-1">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
           <div className="relative min-w-56 flex-1">
             <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
             <input
@@ -862,9 +1254,7 @@ function CensusTableView({
                       UCLA: {r.latest_ucla_score ?? "—"} · GDS-5: {r.latest_yesavage_score ?? "—"} ·{" "}
                       {r.latest_riqueza_lexica !== null ? `${r.latest_riqueza_lexica}% léx.` : "—"}
                     </td>
-                    <td className="px-3 py-3 text-[11px] font-semibold">
-                      {r.latest_adherencia || "No evaluada"}
-                    </td>
+                    <td className="px-3 py-3 text-[11px] font-semibold">{r.latest_adherencia || "No evaluada"}</td>
                     <td className="px-3 py-3">
                       <button
                         type="button"
@@ -886,11 +1276,7 @@ function CensusTableView({
                       </button>
                     </td>
                     <td className="px-3 py-3 text-[11px]">
-                      {r.key_contact_name ? (
-                        <span className="font-semibold">{r.key_contact_name}</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      {r.key_contact_name ? <span className="font-semibold">{r.key_contact_name}</span> : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
@@ -917,19 +1303,26 @@ function VolunteersNetworkView({
   volunteers,
 }: {
   census: ConsoleCensusRow[];
-  volunteers: ReturnType<typeof useConsoleVolunteers>["data"] extends (infer T)[] | undefined ? T[] : never;
+  volunteers: ConsoleVolunteerRow[];
 }) {
   const qc = useQueryClient();
+  const { data: resources = [] } = useCommunityResources(true);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [neighborhood, setNeighborhood] = useState("Chamberí");
-  const [busy, setBusy] = useState(false);
+  const [busyVol, setBusyVol] = useState(false);
+
+  const [resName, setResName] = useState("");
+  const [resSchedule, setResSchedule] = useState("");
+  const [resDesc, setResDesc] = useState("");
+  const [busyRes, setBusyRes] = useState(false);
+
   const coverage = computeDistrictCoverage(census, volunteers);
 
   async function addVolunteer(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    setBusy(true);
+    setBusyVol(true);
     try {
       const { data, error } = await supabase.rpc("console_upsert_volunteer", {
         _name: name.trim(),
@@ -945,7 +1338,33 @@ function VolunteersNetworkView({
     } catch {
       toast.error("No se pudo guardar el voluntario.");
     } finally {
-      setBusy(false);
+      setBusyVol(false);
+    }
+  }
+
+  async function addResource(e: FormEvent) {
+    e.preventDefault();
+    if (!resName.trim()) return;
+    setBusyRes(true);
+    try {
+      const { data, error } = await supabase.rpc("console_upsert_community_resource", {
+        _name: resName.trim(),
+        _category: "centro_mayores",
+        _neighborhood: neighborhood.trim() || "Chamberí",
+        _schedule: resSchedule.trim(),
+        _contact: "",
+        _description: resDesc.trim(),
+      });
+      if (error || !data) throw error ?? new Error("Failed");
+      toast.success(`Recurso «${resName.trim()}» añadido al catálogo del barrio`);
+      setResName("");
+      setResSchedule("");
+      setResDesc("");
+      await qc.invalidateQueries({ queryKey: ["console", "community-resources"] });
+    } catch {
+      toast.error("No se pudo añadir el recurso de barrio.");
+    } finally {
+      setBusyRes(false);
     }
   }
 
@@ -964,139 +1383,202 @@ function VolunteersNetworkView({
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-      <section className="space-y-4 rounded-3xl border bg-card p-5 shadow-sm">
-        <div>
-          <h2 className="text-lg font-black text-foreground">Red Comunitaria de Voluntarios («Voy yo»)</h2>
-          <p className="text-xs text-muted-foreground">
-            Voluntarios conectados desde la app móvil + directorio verificado de la asociación, con carga de visitas en curso y balance mensual.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+        <section className="space-y-4 rounded-3xl border bg-card p-5 shadow-sm">
+          <div>
+            <h2 className="text-lg font-black text-foreground">Red Comunitaria de Voluntarios («Voy yo»)</h2>
+            <p className="text-xs text-muted-foreground">
+              Voluntarios con app activa + directorio verificado de la asociación, visitas en curso y balance mensual.
+            </p>
+          </div>
 
-        <div className="overflow-x-auto rounded-2xl border">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b bg-secondary/70 text-[11px] font-bold uppercase text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2.5">Voluntario</th>
-                <th className="px-3 py-2.5">Barrio</th>
-                <th className="px-3 py-2.5">Canal</th>
-                <th className="px-3 py-2.5">En curso</th>
-                <th className="px-3 py-2.5">Visitas (30d)</th>
-                <th className="px-4 py-2.5 text-right">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {volunteers.length === 0 ? (
+          <div className="overflow-x-auto rounded-2xl border">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b bg-secondary/70 text-[11px] font-bold uppercase text-muted-foreground">
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
-                    Todavía no hay voluntarios registrados.
-                  </td>
+                  <th className="px-4 py-2.5">Voluntario</th>
+                  <th className="px-3 py-2.5">Barrio</th>
+                  <th className="px-3 py-2.5">Canal</th>
+                  <th className="px-3 py-2.5">En curso</th>
+                  <th className="px-3 py-2.5">Visitas (30d)</th>
+                  <th className="px-4 py-2.5 text-right">Estado</th>
                 </tr>
-              ) : (
-                volunteers.map((v) => (
-                  <tr key={v.id}>
-                    <td className="px-4 py-2.5">
-                      <p className="font-bold text-foreground">{v.name}</p>
-                      {v.phone && (
-                        <a href={`tel:${v.phone}`} className="font-mono text-[11px] text-primary hover:underline">
-                          {v.phone}
-                        </a>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 font-semibold">{v.neighborhood || "Chamberí"}</td>
-                    <td className="px-3 py-2.5">
-                      <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold">
-                        {v.source === "profile" ? "App «Voy yo»" : "Directorio ONG"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 font-bold">{v.active_visits}</td>
-                    <td className="px-3 py-2.5 font-bold text-primary">{v.completed_30d}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      {v.source === "directory" ? (
-                        <button
-                          type="button"
-                          onClick={() => void toggleAvailability(v.id, v.available, v.name)}
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                            v.available ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
-                          }`}
-                        >
-                          {v.available ? "Disponible" : "En pausa"}
-                        </button>
-                      ) : (
-                        <span className="rounded-full bg-success/15 px-2.5 py-0.5 text-[10px] font-bold text-success">
-                          Activo app
-                        </span>
-                      )}
+              </thead>
+              <tbody className="divide-y">
+                {volunteers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
+                      Todavía no hay voluntarios registrados.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                ) : (
+                  volunteers.map((v) => (
+                    <tr key={v.id}>
+                      <td className="px-4 py-2.5">
+                        <p className="font-bold text-foreground">{v.name}</p>
+                        {v.phone && (
+                          <a href={`tel:${v.phone}`} className="font-mono text-[11px] text-primary hover:underline">
+                            {v.phone}
+                          </a>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 font-semibold">{v.neighborhood || "Chamberí"}</td>
+                      <td className="px-3 py-2.5">
+                        <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold">
+                          {v.source === "profile" ? "App «Voy yo»" : "Directorio ONG"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 font-bold">{v.active_visits}</td>
+                      <td className="px-3 py-2.5 font-bold text-primary">{v.completed_30d}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        {v.source === "directory" ? (
+                          <button
+                            type="button"
+                            onClick={() => void toggleAvailability(v.id, v.available, v.name)}
+                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+                              v.available ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {v.available ? "Disponible" : "En pausa"}
+                          </button>
+                        ) : (
+                          <span className="rounded-full bg-success/15 px-2.5 py-0.5 text-[10px] font-bold text-success">
+                            Activo app
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-      <div className="space-y-4">
-        <form onSubmit={(e) => void addVolunteer(e)} className="rounded-3xl border bg-card p-5 shadow-sm space-y-3">
+        <div className="space-y-4">
+          <form onSubmit={(e) => void addVolunteer(e)} className="space-y-3 rounded-3xl border bg-card p-5 shadow-sm">
+            <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-foreground">
+              <Plus className="size-4 text-primary" /> Alta rápida de voluntario
+            </h3>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Nombre y apellido"
+              aria-label="Nombre del voluntario"
+              className="h-9 w-full rounded-xl border bg-background px-3 text-xs"
+            />
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Teléfono (+34...)"
+              aria-label="Teléfono del voluntario"
+              className="h-9 w-full rounded-xl border bg-background px-3 text-xs"
+            />
+            <input
+              type="text"
+              value={neighborhood}
+              onChange={(e) => setNeighborhood(e.target.value)}
+              placeholder="Barrio / Distrito"
+              aria-label="Barrio del voluntario"
+              className="h-9 w-full rounded-xl border bg-background px-3 text-xs"
+            />
+            <button
+              type="submit"
+              disabled={busyVol || !name.trim()}
+              className="w-full rounded-xl bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {busyVol ? "Guardando…" : "Añadir a la red"}
+            </button>
+          </form>
+
+          <section className="space-y-2.5 rounded-3xl border bg-card p-5 shadow-sm">
+            <h3 className="text-sm font-extrabold text-foreground">Desiertos de Cobertura</h3>
+            {coverage.map((c) => (
+              <div key={c.neighborhood} className="flex items-center justify-between rounded-xl border px-3 py-2 text-xs">
+                <div>
+                  <p className="font-bold">{c.neighborhood}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {c.seniorsCount} mayores · {c.volunteersAvailable} voluntarios
+                  </p>
+                </div>
+                {c.coverageGap ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
+                    <AlertTriangle className="size-3" /> {c.ratioLabel}
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-bold text-success">
+                    {c.ratioLabel}
+                  </span>
+                )}
+              </div>
+            ))}
+          </section>
+        </div>
+      </div>
+
+      {/* Neighborhood Social Prescription Catalog Management */}
+      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+        <section className="space-y-3 rounded-3xl border bg-card p-5 shadow-sm">
+          <div>
+            <h3 className="flex items-center gap-1.5 text-base font-black text-foreground">
+              <Compass className="size-4 text-primary" />
+              Catálogo de Prescripción Social del Barrio ({resources.length})
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Recursos comunitarios listos para prescribir desde cualquier expediente en 1 clic.
+            </p>
+          </div>
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {resources.map((r) => (
+              <div key={r.id} className="rounded-2xl border bg-background/70 p-3.5 text-xs space-y-1">
+                <p className="font-bold text-foreground">{r.name}</p>
+                <p className="font-semibold text-primary">
+                  {r.neighborhood} · {r.schedule}
+                </p>
+                {r.description && <p className="text-muted-foreground">{r.description}</p>}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <form onSubmit={(e) => void addResource(e)} className="space-y-3 rounded-3xl border bg-card p-5 shadow-sm">
           <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-foreground">
-            <Plus className="size-4 text-primary" /> Alta rápida de voluntario
+            <Plus className="size-4 text-primary" /> Añadir recurso del barrio
           </h3>
           <input
             type="text"
             required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre y apellido"
-            aria-label="Nombre del voluntario"
-            className="h-9 w-full rounded-xl border bg-background px-3 text-xs"
-          />
-          <input
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="Teléfono (+34...)"
-            aria-label="Teléfono del voluntario"
+            value={resName}
+            onChange={(e) => setResName(e.target.value)}
+            placeholder="Ej. Centro Cultural Vallehermoso"
             className="h-9 w-full rounded-xl border bg-background px-3 text-xs"
           />
           <input
             type="text"
-            value={neighborhood}
-            onChange={(e) => setNeighborhood(e.target.value)}
-            placeholder="Barrio / Distrito"
-            aria-label="Barrio del voluntario"
+            value={resSchedule}
+            onChange={(e) => setResSchedule(e.target.value)}
+            placeholder="Horario (ej. Martes 17:00 h)"
             className="h-9 w-full rounded-xl border bg-background px-3 text-xs"
+          />
+          <textarea
+            rows={2}
+            value={resDesc}
+            onChange={(e) => setResDesc(e.target.value)}
+            placeholder="Actividad o contacto de referencia…"
+            className="w-full rounded-xl border bg-background p-2.5 text-xs"
           />
           <button
             type="submit"
-            disabled={busy || !name.trim()}
-            className="w-full rounded-xl bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            disabled={busyRes || !resName.trim()}
+            className="w-full rounded-xl bg-secondary py-2 text-xs font-bold text-primary hover:bg-secondary/80 disabled:opacity-50"
           >
-            {busy ? "Guardando…" : "Añadir a la red"}
+            {busyRes ? "Guardando…" : "Añadir al catálogo social"}
           </button>
         </form>
-
-        <section className="rounded-3xl border bg-card p-5 shadow-sm space-y-2.5">
-          <h3 className="text-sm font-extrabold text-foreground">Desiertos de Cobertura</h3>
-          {coverage.map((c) => (
-            <div key={c.neighborhood} className="flex items-center justify-between rounded-xl border px-3 py-2 text-xs">
-              <div>
-                <p className="font-bold">{c.neighborhood}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {c.seniorsCount} mayores · {c.volunteersAvailable} voluntarios
-                </p>
-              </div>
-              {c.coverageGap ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
-                  <AlertTriangle className="size-3" /> {c.ratioLabel}
-                </span>
-              ) : (
-                <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-bold text-success">
-                  {c.ratioLabel}
-                </span>
-              )}
-            </div>
-          ))}
-        </section>
       </div>
     </div>
   );

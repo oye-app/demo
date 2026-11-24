@@ -231,6 +231,93 @@ export type Database = {
           },
         ]
       }
+      care_interventions: {
+        Row: {
+          alert_id: string | null
+          author_id: string | null
+          author_name: string
+          category: string
+          created_at: string
+          details: string
+          id: string
+          is_demo: boolean
+          outcome: string
+          ring: number
+          senior_id: string
+          title: string
+        }
+        Insert: {
+          alert_id?: string | null
+          author_id?: string | null
+          author_name?: string
+          category?: string
+          created_at?: string
+          details?: string
+          id?: string
+          is_demo?: boolean
+          outcome?: string
+          ring?: number
+          senior_id: string
+          title: string
+        }
+        Update: {
+          alert_id?: string | null
+          author_id?: string | null
+          author_name?: string
+          category?: string
+          created_at?: string
+          details?: string
+          id?: string
+          is_demo?: boolean
+          outcome?: string
+          ring?: number
+          senior_id?: string
+          title?: string
+        }
+        Relationships: []
+      }
+      community_resources: {
+        Row: {
+          active: boolean
+          category: string
+          contact: string
+          created_at: string
+          description: string
+          id: string
+          is_demo: boolean
+          name: string
+          neighborhood: string
+          org_id: string | null
+          schedule: string
+        }
+        Insert: {
+          active?: boolean
+          category?: string
+          contact?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_demo?: boolean
+          name: string
+          neighborhood?: string
+          org_id?: string | null
+          schedule?: string
+        }
+        Update: {
+          active?: boolean
+          category?: string
+          contact?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_demo?: boolean
+          name?: string
+          neighborhood?: string
+          org_id?: string | null
+          schedule?: string
+        }
+        Relationships: []
+      }
       check_ins: {
         Row: {
           created_at: string
@@ -853,6 +940,68 @@ export type Database = {
           completed_30d: number
           last_visit_at: string | null
         }[]
+      }
+      console_get_senior_dossier: {
+        Args: { _senior_id: string }
+        Returns: Json
+      }
+      console_list_community_resources: {
+        Args: never
+        Returns: {
+          id: string
+          org_id: string | null
+          name: string
+          category: string
+          neighborhood: string
+          schedule: string
+          contact: string
+          description: string
+          is_demo: boolean
+          active: boolean
+          created_at: string
+        }[]
+      }
+      console_log_intervention: {
+        Args: {
+          _senior_id: string
+          _category?: string
+          _ring?: number
+          _title?: string
+          _details?: string
+          _outcome?: string
+          _alert_id?: string | null
+        }
+        Returns: string | null
+      }
+      console_update_senior_profile: {
+        Args: {
+          _senior_id: string
+          _phone?: string | null
+          _age?: number | null
+          _neighborhood?: string | null
+          _family_contact?: string | null
+          _notes?: string | null
+          _key_contact_name?: string | null
+          _key_contact_phone?: string | null
+          _meds?: string | null
+          _appointments?: string | null
+          _birthday?: string | null
+          _schedule_active?: boolean | null
+          _schedule_call_hour?: number | null
+          _schedule_days?: number[] | null
+        }
+        Returns: boolean
+      }
+      console_upsert_community_resource: {
+        Args: {
+          _name: string
+          _category?: string
+          _neighborhood?: string
+          _schedule?: string
+          _contact?: string
+          _description?: string
+        }
+        Returns: string | null
       }
       manage_person: {
         Args: {

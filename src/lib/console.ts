@@ -2,6 +2,54 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ESCALATE_FAMILY_MIN, ESCALATE_ONG_MIN, RETRY_MIN, sameArea } from "@/lib/alerts";
+import type { CallLogRow } from "@/lib/call-logs";
+
+export type CareInterventionRow = {
+  id: string;
+  senior_id: string;
+  alert_id: string | null;
+  author_name: string;
+  category: string;
+  ring: number;
+  title: string;
+  details: string;
+  outcome: string;
+  created_at: string;
+};
+
+export type DossierAlertRow = {
+  id: string;
+  status: string;
+  mood: string;
+  need: string;
+  volunteer_name: string;
+  summary: string;
+  memory_note: string;
+  visit_note: string;
+  created_at: string;
+  accepted_at: string | null;
+  arrived_at: string | null;
+  visited_at: string | null;
+};
+
+export type SeniorDossierData = {
+  interventions: CareInterventionRow[];
+  alerts: DossierAlertRow[];
+};
+
+export type CommunityResourceRow = {
+  id: string;
+  org_id: string | null;
+  name: string;
+  category: string;
+  neighborhood: string;
+  schedule: string;
+  contact: string;
+  description: string;
+  is_demo: boolean;
+  active: boolean;
+  created_at: string;
+};
 
 export type ConsoleCensusRow = {
   senior_id: string;
@@ -605,6 +653,431 @@ export function useConsoleCohortSummary(enabled = true) {
   });
 }
 
+export type AgendaBucket = "completed_today" | "missed_or_overdue" | "pending_today" | "paused";
+
+export type DailyAgendaEntry = {
+  row: ConsoleCensusRow;
+  bucket: AgendaBucket;
+  scheduledHour: number;
+  reason: string;
+};
+
+function madridClock(now: Date): { dateKey: string; hour: number; isoDay: number } {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    weekday: "short",
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
+  const weekdayMap: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+  return {
+    dateKey: `${parts['year'] ?? "2026"}-${parts['month'] ?? "01"}-${parts['day'] ?? "01"}`,
+    hour: Number(parts['hour'] ?? 11),
+    isoDay: weekdayMap[parts['weekday'] ?? "Mon"] ?? 1,
+  };
+}
+
+function sameMadridDay(iso: string | null, dateKey: string): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  return madridClock(d).dateKey === dateKey;
+}
+
+/**
+ * Evaluates today's daily-call SLA across the whole census (Europe/Madrid timezone)
+ * to eliminate blind spots between automated calling and coordinator oversight.
+ */
+export function computeTodayScheduleCoverage(
+  census: ConsoleCensusRow[],
+  now = new Date()
+): {
+  entries: DailyAgendaEntry[];
+  completedCount: number;
+  overdueCount: number;
+  pendingCount: number;
+  pausedCount: number;
+  madridDateKey: string;
+  madridHour: number;
+} {
+  const { dateKey, hour, isoDay } = madridClock(now);
+  const entries: DailyAgendaEntry[] = [];
+  let completedCount = 0;
+  let overdueCount = 0;
+  let pendingCount = 0;
+  let pausedCount = 0;
+
+  for (const row of census) {
+    const scheduledHour = row.schedule_call_hour ?? 11;
+    const days = row.schedule_days && row.schedule_days.length > 0 ? row.schedule_days : [1, 2, 3, 4, 5, 6, 7];
+    const calledToday = sameMadridDay(row.latest_call_at, dateKey);
+
+    if (!row.schedule_active || !days.includes(isoDay)) {
+      pausedCount += 1;
+      entries.push({
+        row,
+        bucket: "paused",
+        scheduledHour,
+        reason: !row.schedule_active ? "Pausa temporal / Vacaciones" : "Fuera de días programados",
+      });
+      continue;
+    }
+
+    if (calledToday && row.latest_call_status === "completada") {
+      completedCount += 1;
+      entries.push({
+        row,
+        bucket: "completed_today",
+        scheduledHour,
+        reason: `Completada hoy (${row.latest_nivel_alerta || "VERDE"})`,
+      });
+      continue;
+    }
+
+    if (
+      (calledToday && (row.latest_call_status === "no_contesta" || row.latest_call_status === "urgencia_en_curso" || row.latest_call_status === "error")) ||
+      (!calledToday && hour > scheduledHour)
+    ) {
+      overdueCount += 1;
+      entries.push({
+        row,
+        bucket: "missed_or_overdue",
+        scheduledHour,
+        reason: calledToday
+          ? `Incidencia hoy: ${row.latest_call_status}`
+          : `Sin llamada tras las ${String(scheduledHour).padStart(2, "0")}:00 h`,
+      });
+      continue;
+    }
+
+    pendingCount += 1;
+    entries.push({
+      row,
+      bucket: "pending_today",
+      scheduledHour,
+      reason: `Programada hoy a las ${String(scheduledHour).padStart(2, "0")}:00 h`,
+    });
+  }
+
+  const order: Record<AgendaBucket, number> = {
+    missed_or_overdue: 0,
+    pending_today: 1,
+    completed_today: 2,
+    paused: 3,
+  };
+  entries.sort((a, b) => order[a.bucket] - order[b.bucket] || a.scheduledHour - b.scheduledHour);
+
+  return {
+    entries,
+    completedCount,
+    overdueCount,
+    pendingCount,
+    pausedCount,
+    madridDateKey: dateKey,
+    madridHour: hour,
+  };
+}
+
+export type ClinicalSeriesPoint = {
+  id: string;
+  dateLabel: string;
+  fullDate: string;
+  globalPct: number;
+  uclaWellbeingPct: number | null;
+  yesavageWellbeingPct: number | null;
+  lexicalPct: number | null;
+  wordsPerTurn: number | null;
+  latencySec: number | null;
+  nivelAlerta: string;
+};
+
+export function buildClinicalChartSeries(logs: CallLogRow[], limit = 14): {
+  points: ClinicalSeriesPoint[];
+  baselineAvgPct: number | null;
+  latestPct: number | null;
+  deltaFromBaseline: number | null;
+  baselineLexicalPct: number | null;
+  latestLexicalPct: number | null;
+} {
+  const completed = [...logs]
+    .filter((l) => l.status === "completada" && typeof (l.global_pct ?? l.report?.global_pct) === "number")
+    .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+    .slice(-limit);
+
+  const points: ClinicalSeriesPoint[] = completed.map((l) => {
+    const r = l.report;
+    const globalPct = Math.round(Number(l.global_pct ?? r?.global_pct ?? 85));
+    const uclaRaw = r?.scores?.ucla3?.pct_bienestar ?? r?.sub_percentages?.social ?? null;
+    const gdsRaw = r?.scores?.yesavage_gds5?.pct_bienestar ?? r?.sub_percentages?.mood ?? null;
+    const bio = r?.evaluacion_escalas?.indicadores_vocales_cognitivos?.biomarcadores;
+
+    return {
+      id: l.id,
+      dateLabel: new Date(l.created_at).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" }),
+      fullDate: new Date(l.created_at).toLocaleString("es-ES", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      globalPct,
+      uclaWellbeingPct: typeof uclaRaw === "number" ? Math.round(uclaRaw) : null,
+      yesavageWellbeingPct: typeof gdsRaw === "number" ? Math.round(gdsRaw) : null,
+      lexicalPct: typeof bio?.riqueza_lexica_pct === "number" ? Math.round(bio.riqueza_lexica_pct) : null,
+      wordsPerTurn: typeof bio?.palabras_por_respuesta === "number" ? bio.palabras_por_respuesta : null,
+      latencySec: typeof bio?.latencia_respuesta_seg === "number" ? bio.latencia_respuesta_seg : null,
+      nivelAlerta: r?.nivel_alerta || l.nivel_alerta || "VERDE",
+    };
+  });
+
+  const baselineSample = points.slice(0, Math.min(3, points.length));
+  const baselineAvgPct =
+    baselineSample.length > 0
+      ? Math.round(baselineSample.reduce((s, p) => s + p.globalPct, 0) / baselineSample.length)
+      : null;
+  const latestPct = points[points.length - 1]?.globalPct ?? null;
+  const deltaFromBaseline =
+    baselineAvgPct !== null && latestPct !== null ? latestPct - baselineAvgPct : null;
+
+  const lexPoints = points.filter((p) => p.lexicalPct !== null);
+  const baselineLexicalPct = lexPoints[0]?.lexicalPct ?? null;
+  const latestLexicalPct = lexPoints[lexPoints.length - 1]?.lexicalPct ?? null;
+
+  return {
+    points,
+    baselineAvgPct,
+    latestPct,
+    deltaFromBaseline,
+    baselineLexicalPct,
+    latestLexicalPct,
+  };
+}
+
+export type LifeStoryItem = {
+  id: string;
+  dateLabel: string;
+  quote: string;
+  insight: string;
+  alertLevel: string;
+};
+
+export function extractLifeStoryQuotes(logs: CallLogRow[]): LifeStoryItem[] {
+  const seen = new Set<string>();
+  const items: LifeStoryItem[] = [];
+  const sorted = [...logs]
+    .filter((l) => l.status === "completada")
+    .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+
+  for (const log of sorted) {
+    const quotes = log.report?.citas_textuales ?? [];
+    const quote = quotes.find((q) => typeof q === "string" && q.trim().length > 4)?.trim();
+    if (!quote) continue;
+    const norm = quote.toLowerCase();
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    items.push({
+      id: log.id,
+      dateLabel: new Date(log.created_at).toLocaleDateString("es-ES", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }),
+      quote,
+      insight: log.report?.oye_recuerda_insight || log.report?.summary || "",
+      alertLevel: log.report?.nivel_alerta || log.nivel_alerta || "VERDE",
+    });
+  }
+
+  return items;
+}
+
+export function buildFhirR4Bundle(row: ConsoleCensusRow) {
+  const nowIso = row.latest_call_at || new Date().toISOString();
+  const entries: Record<string, unknown>[] = [
+    {
+      resource: {
+        resourceType: "Patient",
+        id: row.senior_id,
+        name: [{ text: row.name }],
+        telecom: row.phone ? [{ system: "phone", value: row.phone }] : [],
+        address: [{ district: row.neighborhood || "Chamberí", country: "ES" }],
+      },
+    },
+    {
+      resource: {
+        resourceType: "RiskAssessment",
+        status: "final",
+        subject: { reference: `Patient/${row.senior_id}` },
+        occurrenceDateTime: nowIso,
+        prediction: [
+          {
+            outcome: {
+              coding: [
+                {
+                  system: "https://oye.app/fhir/triage-level",
+                  code: row.latest_nivel_alerta || "VERDE",
+                  display:
+                    row.latest_nivel_alerta === "ROJO"
+                      ? "Urgencia / Derivación inmediata Anillo 2-3"
+                      : row.latest_nivel_alerta === "AMARILLO"
+                      ? "Seguimiento preventivo comunitario"
+                      : "Estable · Filtrado sin intervención",
+                },
+              ],
+            },
+            qualitativeRisk: {
+              text: row.latest_headline || row.latest_summary || "Seguimiento diario OYE",
+            },
+          },
+        ],
+      },
+    },
+  ];
+
+  if (row.latest_global_pct !== null) {
+    entries.push({
+      resource: {
+        resourceType: "Observation",
+        status: "final",
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "survey" }] }],
+        code: { text: "Índice Global de Bienestar OYE (%)" },
+        subject: { reference: `Patient/${row.senior_id}` },
+        effectiveDateTime: nowIso,
+        valueQuantity: { value: row.latest_global_pct, unit: "%" },
+      },
+    });
+  }
+
+  if (row.latest_ucla_score !== null) {
+    entries.push({
+      resource: {
+        resourceType: "Observation",
+        status: "final",
+        code: { text: "UCLA 3-Item Loneliness Scale (estimación conversacional)" },
+        subject: { reference: `Patient/${row.senior_id}` },
+        effectiveDateTime: nowIso,
+        valueInteger: row.latest_ucla_score,
+      },
+    });
+  }
+
+  if (row.latest_yesavage_score !== null) {
+    entries.push({
+      resource: {
+        resourceType: "Observation",
+        status: "final",
+        code: { text: "Yesavage GDS-5 Screening Ánimo (estimación conversacional)" },
+        subject: { reference: `Patient/${row.senior_id}` },
+        effectiveDateTime: nowIso,
+        valueInteger: row.latest_yesavage_score,
+      },
+    });
+  }
+
+  if (row.latest_riqueza_lexica !== null) {
+    entries.push({
+      resource: {
+        resourceType: "Observation",
+        status: "final",
+        code: { text: "Biomarcador Vocal · Riqueza Léxica (%)" },
+        subject: { reference: `Patient/${row.senior_id}` },
+        effectiveDateTime: nowIso,
+        valueQuantity: { value: row.latest_riqueza_lexica, unit: "%" },
+      },
+    });
+  }
+
+  return {
+    resourceType: "Bundle",
+    type: "collection",
+    timestamp: new Date().toISOString(),
+    meta: {
+      source: "https://oye.app/console",
+      profile: ["https://hl7.org/fhir/R4/bundle.html"],
+    },
+    entry: entries,
+  };
+}
+
+export function buildNativeTriagePayload(row: ConsoleCensusRow) {
+  return {
+    event: "oye.triage.completed",
+    timestamp: row.latest_call_at || new Date().toISOString(),
+    senior: {
+      person_id: row.senior_id,
+      name: row.name,
+      age: row.age,
+      neighborhood: row.neighborhood,
+      key_contact: row.key_contact_name
+        ? `${row.key_contact_name}${row.key_contact_phone ? ` (${row.key_contact_phone})` : ""}`
+        : null,
+    },
+    triage: {
+      nivel_alerta: row.latest_nivel_alerta || "VERDE",
+      global_pct: row.latest_global_pct,
+      ucla3_score: row.latest_ucla_score,
+      yesavage_gds5_score: row.latest_yesavage_score,
+      adherencia_medicacion: row.latest_adherencia || "NO_MENCIONADO",
+      biomarcadores: {
+        estado_vocal: row.latest_vocal_estado || "FLUIDO_ORIENTADO",
+        riqueza_lexica_pct: row.latest_riqueza_lexica,
+        palabras_por_respuesta: row.latest_palabras_resp,
+        latencia_respuesta_seg: row.latest_latencia_seg,
+      },
+      anillo_derivacion: row.latest_anillo || "NINGUNO",
+      cita_textual: row.latest_cita || null,
+    },
+  };
+}
+
+export function useSeniorDossier(seniorId?: string) {
+  return useQuery({
+    queryKey: ["console", "dossier", seniorId ?? ""],
+    enabled: !!seniorId,
+    queryFn: async (): Promise<SeniorDossierData> => {
+      if (!seniorId) return { interventions: [], alerts: [] };
+      const { data, error } = await supabase.rpc("console_get_senior_dossier", {
+        _senior_id: seniorId,
+      });
+      if (error || !data || typeof data !== "object") {
+        return { interventions: [], alerts: [] };
+      }
+      const obj = data as Record<string, unknown>;
+      return {
+        interventions: Array.isArray(obj["interventions"]) ? (obj["interventions"] as CareInterventionRow[]) : [],
+        alerts: Array.isArray(obj["alerts"]) ? (obj["alerts"] as DossierAlertRow[]) : [],
+      };
+    },
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useCommunityResources(enabled = true) {
+  return useQuery({
+    queryKey: ["console", "community-resources"],
+    enabled,
+    queryFn: async (): Promise<CommunityResourceRow[]> => {
+      const { data, error } = await supabase.rpc("console_list_community_resources");
+      if (error) throw error;
+      return (data ?? []) as CommunityResourceRow[];
+    },
+    staleTime: 30_000,
+  });
+}
+
 export function useConsoleRealtimeSync(enabled = true) {
   const qc = useQueryClient();
 
@@ -631,6 +1104,12 @@ export function useConsoleRealtimeSync(enabled = true) {
         void qc.invalidateQueries({ queryKey: ["console"] });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "senior_care" }, () => {
+        void qc.invalidateQueries({ queryKey: ["console"] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "care_interventions" }, () => {
+        void qc.invalidateQueries({ queryKey: ["console"] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "community_resources" }, () => {
         void qc.invalidateQueries({ queryKey: ["console"] });
       })
       .subscribe();
