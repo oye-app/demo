@@ -84,6 +84,11 @@ export type SituationReport = {
         palabras_por_respuesta: number;
         riqueza_lexica_pct: number;
         latencia_respuesta_seg: number | null;
+        latencia_max_seg?: number | null;
+        variabilidad_latencia_seg?: number | null;
+        velocidad_habla_ppm?: number | null;
+        indice_repeticion_tema?: number | null;
+        tendencia_intra_llamada?: "mejora_durante_charla" | "estable" | "cierre_fatiga" | string;
         comparativa_previa?: string;
         baseline_riqueza_pct?: number | null;
         baseline_palabras_resp?: number | null;

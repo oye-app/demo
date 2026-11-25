@@ -1,7 +1,10 @@
-import { Activity, AlertTriangle, Clock, Download, FileCheck2, MapPin, Pill, Printer, ShieldCheck, TrendingUp } from "lucide-react";
+import { useState } from "react";
+import { Activity, AlertTriangle, Check, Clock, Copy, Download, FileCheck2, MapPin, Pill, Printer, ShieldCheck, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
 import { B2BModeSelector } from "@/components/b2b-meeting-panel";
 import {
   buildConsoleCsvExport,
+  computeB2BPayerEvidenceReport,
   computeCohortUnitEconomics,
   computeDistrictCoverage,
   type ConsoleCensusRow,
@@ -21,8 +24,10 @@ export function AnalyticsPanel({
   summary: ConsoleCohortSummary | null;
   qaMetrics?: ConsoleQaMetrics | null;
 }) {
+  const [copiedDossier, setCopiedDossier] = useState(false);
   const coverage = computeDistrictCoverage(census, volunteers);
   const economics = computeCohortUnitEconomics(summary, census.length);
+  const payerEvidence = computeB2BPayerEvidenceReport({ census, summary, qaMetrics });
   const medRatePct =
     summary && summary.med_evaluated_30d > 0
       ? Math.round((summary.med_confirmed_30d / summary.med_evaluated_30d) * 100)
@@ -258,10 +263,63 @@ export function AnalyticsPanel({
                 : "Sin auditar aún"}
             </span>
           </div>
-          <div className="rounded-xl border bg-background/70 p-3">
+            <div className="rounded-xl border bg-background/70 p-3">
             <span className="block text-[10px] font-semibold text-muted-foreground">Incidencias QA Reportadas</span>
             <span className="text-lg font-black">
               {qaMetrics ? `${qaMetrics.false_positive_count} FP · ${qaMetrics.false_negative_count} FN` : "0 FP · 0 FN"}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* B2B Actuarial Evidence & Payer ROI Pitch Dossier */}
+      <section className="rounded-2xl border border-primary/20 bg-primary/5 p-5 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-foreground">
+              <ShieldCheck className="size-4 text-primary" />
+              Dossier Actuario & Evidencia Clínica B2B (Aseguradoras / Municipios)
+            </h3>
+            <p className="text-[11px] text-muted-foreground">
+              Argumentario cuantitativo con métricas vivas para licitaciones públicas y pilotos con Sanitas, Mapfre, Tunstall o Atenzia.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(payerEvidence.markdownDossier)
+                .then(() => {
+                  setCopiedDossier(true);
+                  toast.success("Dossier ejecutivo B2B copiado");
+                  setTimeout(() => setCopiedDossier(false), 2000);
+                })
+                .catch(() => toast.error("No se pudo copiar el dossier"));
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 print:hidden"
+          >
+            {copiedDossier ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            {copiedDossier ? "Dossier copiado" : "Copiar Dossier B2B (.md)"}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+          <div className="rounded-xl border bg-card p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">Filtrado Autónomo Verde</span>
+            <span className="text-lg font-black text-foreground tabular-nums">{payerEvidence.greenFilteredRatePct}%</span>
+          </div>
+          <div className="rounded-xl border bg-card p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">vs. Teleasistencia (24,90 €)</span>
+            <span className="text-lg font-black text-success tabular-nums">-{payerEvidence.savingVsClassicTelecarePct}% coste</span>
+          </div>
+          <div className="rounded-xl border bg-card p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">vs. Sensores Casa (92 €)</span>
+            <span className="text-lg font-black text-success tabular-nums">-{payerEvidence.savingVsAmbientSensorsPct}% coste</span>
+          </div>
+          <div className="rounded-xl border bg-card p-3">
+            <span className="block text-[10px] font-semibold text-muted-foreground">Ahorro Cohorte Activa</span>
+            <span className="text-lg font-black text-primary tabular-nums">
+              {payerEvidence.projectedCohortMonthlySavingVsTelecareEur} €/mes
             </span>
           </div>
         </div>

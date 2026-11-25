@@ -154,6 +154,10 @@ export function RiskRadarCard({ radar, seniorName, onAction }: RiskRadarCardProp
             <span className="text-slate-500 tabular-nums">
               {vocalBaseline.latestWordsPerTurn} pal/resp
               {vocalBaseline.latestLatencySec !== null ? ` · ${vocalBaseline.latestLatencySec}s latencia` : ""}
+              {vocalBaseline.latestSpeechRatePpm !== null ? ` · ${vocalBaseline.latestSpeechRatePpm} ppm` : ""}
+              {vocalBaseline.latestRepetitionIndex !== null && vocalBaseline.latestRepetitionIndex > 0
+                ? ` · ${Math.round(vocalBaseline.latestRepetitionIndex * 100)}% rep.`
+                : ""}
             </span>
           )}
         </div>

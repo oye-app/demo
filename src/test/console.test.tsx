@@ -7,6 +7,7 @@ import {
   buildFhirR4Bundle,
   buildNativeTriagePayload,
   classifyUrgencyTier,
+  computeB2BPayerEvidenceReport,
   computeCohortUnitEconomics,
   computeDistrictCoverage,
   computeModelProvenanceBadge,
@@ -25,6 +26,7 @@ import {
   type ConsoleQaMetrics,
   type ConsoleVolunteerRow,
 } from "@/lib/console";
+import { buildOutboundCallContext, extractLifeMemories, matchNeighborhoodPlan } from "@/lib/call-memory";
 import type { CallLogRow } from "@/lib/call-logs";
 import { DispatchPanel } from "@/components/console/dispatch-panel";
 import { AnalyticsPanel } from "@/components/console/analytics-panel";
@@ -608,5 +610,148 @@ describe("OYE Consola Web Desktop & Lógica Clínica N1", () => {
     } finally {
       globalThis.fetch = origFetch;
     }
+  });
+
+  it("extractLifeMemories, matchNeighborhoodPlan, computeB2BPayerEvidenceReport y marcadores cognitivos funcionan con datos reales", () => {
+    const wednesdayMadrid = new Date("2026-11-25T10:00:00Z"); // Miércoles
+    const plan = matchNeighborhoodPlan({
+      neighborhood: "Chamberí",
+      now: wednesdayMadrid,
+      resources: [
+        {
+          name: "Centro Municipal Blasco de Garay",
+          category: "centro_mayores",
+          neighborhood: "Chamberí",
+          schedule: "L-V 10:00–19:00",
+        },
+        {
+          name: "Taller de Memoria & Café Comunitario",
+          category: "taller_memoria",
+          neighborhood: "Chamberí",
+          schedule: "Miércoles 11:30–13:00",
+        },
+      ],
+    });
+    expect(plan).toContain("Taller de Memoria & Café Comunitario");
+
+    const outbound = buildOutboundCallContext({
+      neighborhood: "Chamberí",
+      now: wednesdayMadrid,
+      seniorCare: { meds: "Enalapril 10mg", key_contact_name: "Rosa", key_contact_phone: "+34678617031" },
+      communityResources: [
+        {
+          name: "Taller de Memoria & Café Comunitario",
+          category: "taller_memoria",
+          neighborhood: "Chamberí",
+          schedule: "Miércoles 11:30–13:00",
+        },
+      ],
+      recentCompleted: [
+        makeCallLog({
+          id: "m1",
+          report: {
+            nivel_alerta: "AMARILLO",
+            global_pct: 68,
+            home_headline: "Seguimiento",
+            summary: "No tomó medicación",
+            recuerdo_biografico_nuevo: "Veranos en San Sebastián",
+            evaluacion_escalas: {
+              soledad_ucla: { nivel: "RIESGO_MODERADO", puntuacion_estimada: 6, evidencia_escuchada: "«...»" },
+              autocuidado_y_salud: {
+                alimentacion_hidratacion: "CORRECTO",
+                sueno_descanso: "CORRECTO",
+                adherencia_medicacion: "NO_TOMADA",
+                evidencia_escuchada: "«No me la tomé»",
+              },
+            },
+          },
+        }),
+        makeCallLog({
+          id: "m2",
+          report: {
+            nivel_alerta: "VERDE",
+            global_pct: 85,
+            home_headline: "Bien",
+            summary: "Tranquila",
+            recuerdo_biografico_nuevo: "Tenía un canario llamado Pipín",
+          },
+        }),
+      ],
+    });
+
+    expect(extractLifeMemories([makeCallLog({ report: { nivel_alerta: "VERDE", global_pct: 80, home_headline: "Bien", summary: "Bien", recuerdo_biografico_nuevo: "Recuerdo X" } })])).toEqual(["Recuerdo X"]);
+    expect(outbound.life_memories).toContain("Veranos en San Sebastián");
+    expect(outbound.life_memories).toContain("Pipín");
+    expect(outbound.pending_followups).toContain("Enalapril 10mg");
+    expect(outbound.clinical_focus_mode).toBe("vigilancia_adherencia");
+
+    const radarWithRepetition = computePredictiveRiskRadar({
+      senior: makeSenior(),
+      logs: [
+        makeCallLog({
+          report: {
+            nivel_alerta: "VERDE",
+            global_pct: 82,
+            home_headline: "Bien",
+            summary: "Charla repetitiva",
+            evaluacion_escalas: {
+              indicadores_vocales_cognitivos: {
+                estado: "FLUIDO_ORIENTADO",
+                observacion: "Ok",
+                biomarcadores: {
+                  palabras_totales: 50,
+                  palabras_por_respuesta: 15,
+                  riqueza_lexica_pct: 70,
+                  latencia_respuesta_seg: 2.5,
+                  indice_repeticion_tema: 0.56,
+                },
+              },
+            },
+          },
+        }),
+      ],
+      now: wednesdayMadrid,
+    });
+    expect(radarWithRepetition.drivers.some((d) => d.id === "cognitive_micro_markers")).toBe(true);
+
+    const summary: ConsoleCohortSummary = {
+      total_seniors: 100,
+      active_schedules: 95,
+      paused_schedules: 5,
+      open_alerts: 2,
+      no_answer_open: 1,
+      dispatched_active: 1,
+      calls_30d: 1000,
+      green_calls_30d: 820,
+      filter_green_pct: 82,
+      visits_30d: 18,
+      avg_dispatch_min: 14,
+      avg_global_pct_30d: 83,
+      avg_ucla_30d: 4.1,
+      avg_yesavage_30d: 1.2,
+      med_confirmed_30d: 900,
+      med_evaluated_30d: 980,
+      avg_riqueza_lexica_30d: 86,
+      silent_deterioration_count: 3,
+    };
+    const evidence = computeB2BPayerEvidenceReport({
+      census: [makeSenior()],
+      summary,
+      qaMetrics: {
+        total_live_calls: 50,
+        simulated_count: 5,
+        llm_calls_count: 50,
+        deterministic_count: 0,
+        verified_count: 48,
+        false_positive_count: 2,
+        false_negative_count: 0,
+        pending_qa_count: 0,
+        precision_pct: 96,
+      },
+    });
+    expect(evidence.greenFilteredRatePct).toBe(82);
+    expect(evidence.savingVsClassicTelecarePct).toBe(66);
+    expect(evidence.savingVsAmbientSensorsPct).toBe(91);
+    expect(evidence.markdownDossier).toContain("96%");
   });
 });

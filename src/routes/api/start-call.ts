@@ -28,7 +28,7 @@ export const Route = createFileRoute("/api/start-call")({
         // Load person details
         const { data: senior, error: seniorError } = await supabaseAdmin
           .from("seniors")
-          .select("id, name, phone, age")
+          .select("id, name, phone, age, neighborhood")
           .eq("id", personId)
           .maybeSingle();
 
@@ -36,33 +36,41 @@ export const Route = createFileRoute("/api/start-call")({
           return Response.json({ error: "Persona no encontrada" }, { status: 404 });
         }
 
-        // Load relation, recent completed calls, and care sheet in parallel
-        const [{ data: link }, { data: recentCompleted }, { data: seniorCare }] = await Promise.all([
-          supabaseAdmin
-            .from("person_links")
-            .select("relation")
-            .eq("senior_id", personId)
-            .maybeSingle(),
-          supabaseAdmin
-            .from("call_logs")
-            .select("nivel_alerta, global_pct, motivo, created_at, report")
-            .eq("person_id", personId)
-            .eq("status", "completada")
-            .order("created_at", { ascending: false })
-            .limit(3),
-          supabaseAdmin
-            .from("senior_care")
-            .select("key_contact_name, key_contact_phone, meds, appointments, birthday")
-            .eq("senior_id", personId)
-            .order("updated_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        ]);
+        // Load relation, recent completed calls, care sheet, and community resources in parallel
+        const [{ data: link }, { data: recentCompleted }, { data: seniorCare }, { data: communityResources }] =
+          await Promise.all([
+            supabaseAdmin
+              .from("person_links")
+              .select("relation")
+              .eq("senior_id", personId)
+              .maybeSingle(),
+            supabaseAdmin
+              .from("call_logs")
+              .select("nivel_alerta, global_pct, motivo, created_at, report")
+              .eq("person_id", personId)
+              .eq("status", "completada")
+              .order("created_at", { ascending: false })
+              .limit(5),
+            supabaseAdmin
+              .from("senior_care")
+              .select("key_contact_name, key_contact_phone, meds, appointments, birthday")
+              .eq("senior_id", personId)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+            supabaseAdmin
+              .from("community_resources")
+              .select("name, category, neighborhood, schedule, active")
+              .eq("active", true)
+              .limit(20),
+          ]);
 
         const relationship = link?.relation || "Familiar";
         const outboundContext = buildOutboundCallContext({
           recentCompleted: recentCompleted ?? [],
           seniorCare: seniorCare ?? null,
+          communityResources: communityResources ?? [],
+          neighborhood: senior.neighborhood,
         });
 
         // Format phone to E.164 without spaces

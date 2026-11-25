@@ -924,6 +924,10 @@ export type PersonalVocalBaseline = {
   deltaWordsPct: number | null;
   latestLatencySec: number | null;
   baselineLatencySec: number | null;
+  latestRepetitionIndex: number | null;
+  latestLatencyVariabilitySec: number | null;
+  latestSpeechRatePpm: number | null;
+  latestIntraCallTrend: string | null;
   driftDetected: boolean;
   statusLabel: "estable" | "desvio_detectado" | "linea_base_inicial" | "sin_datos";
 };
@@ -953,6 +957,10 @@ export function computePersonalVocalBaseline(logs: CallLogRow[]): PersonalVocalB
       deltaWordsPct: null,
       latestLatencySec: null,
       baselineLatencySec: null,
+      latestRepetitionIndex: null,
+      latestLatencyVariabilitySec: null,
+      latestSpeechRatePpm: null,
+      latestIntraCallTrend: null,
       driftDetected: false,
       statusLabel: "sin_datos",
     };
@@ -970,6 +978,14 @@ export function computePersonalVocalBaseline(logs: CallLogRow[]): PersonalVocalB
     typeof latest.bio.latencia_respuesta_seg === "number"
       ? Math.round(latest.bio.latencia_respuesta_seg * 10) / 10
       : null;
+  const latestRepetitionIndex =
+    typeof latest.bio.indice_repeticion_tema === "number" ? latest.bio.indice_repeticion_tema : null;
+  const latestLatencyVariabilitySec =
+    typeof latest.bio.variabilidad_latencia_seg === "number" ? latest.bio.variabilidad_latencia_seg : null;
+  const latestSpeechRatePpm =
+    typeof latest.bio.velocidad_habla_ppm === "number" ? latest.bio.velocidad_habla_ppm : null;
+  const latestIntraCallTrend =
+    typeof latest.bio.tendencia_intra_llamada === "string" ? latest.bio.tendencia_intra_llamada : null;
 
   if (prior.length === 0) {
     return {
@@ -982,6 +998,10 @@ export function computePersonalVocalBaseline(logs: CallLogRow[]): PersonalVocalB
       deltaWordsPct: 0,
       latestLatencySec,
       baselineLatencySec: latestLatencySec,
+      latestRepetitionIndex,
+      latestLatencyVariabilitySec,
+      latestSpeechRatePpm,
+      latestIntraCallTrend,
       driftDetected: false,
       statusLabel: "linea_base_inicial",
     };
@@ -1026,6 +1046,10 @@ export function computePersonalVocalBaseline(logs: CallLogRow[]): PersonalVocalB
     deltaWordsPct,
     latestLatencySec,
     baselineLatencySec,
+    latestRepetitionIndex,
+    latestLatencyVariabilitySec,
+    latestSpeechRatePpm,
+    latestIntraCallTrend,
     driftDetected,
     statusLabel: driftDetected ? "desvio_detectado" : "estable",
   };
@@ -1187,6 +1211,24 @@ export function computePredictiveRiskRadar(params: {
       id: "vocal_brief",
       label: "Respuestas breves o menor fluidez",
       detail: "Recomendable validar descanso o fatiga en siguiente contacto.",
+      points: pts,
+      severity: "medium",
+    });
+  }
+
+  if (
+    (vocalBaseline.latestRepetitionIndex !== null && vocalBaseline.latestRepetitionIndex >= 0.35) ||
+    (vocalBaseline.latestLatencyVariabilitySec !== null && vocalBaseline.latestLatencyVariabilitySec >= 4.0)
+  ) {
+    const pts = 10;
+    rawScore += pts;
+    drivers.push({
+      id: "cognitive_micro_markers",
+      label:
+        vocalBaseline.latestRepetitionIndex !== null && vocalBaseline.latestRepetitionIndex >= 0.35
+          ? `Repetición temática intra-llamada (${Math.round(vocalBaseline.latestRepetitionIndex * 100)}%)`
+          : `Alta variabilidad de latencia inter-turno (±${vocalBaseline.latestLatencyVariabilitySec}s)`,
+      detail: "Marcador temprano de duda cognitiva o fatiga atencional extraído del habla.",
       points: pts,
       severity: "medium",
     });
@@ -1444,6 +1486,92 @@ export function validateWebhookTargetUrl(rawUrl: string): { ok: true; url: URL }
   }
 
   return { ok: true, url: parsed };
+}
+
+export type B2BPayerEvidenceReport = {
+  activeSeniors: number;
+  calls30d: number;
+  greenFilteredRatePct: number;
+  avgWellbeingPct: number | null;
+  medAdherencePct: number | null;
+  qaPrecisionPct: number | null;
+  savedHumanHours30d: number;
+  oyeMonthlyUnitCostEur: number;
+  savingVsClassicTelecarePct: number;
+  savingVsAmbientSensorsPct: number;
+  projectedCohortMonthlySavingVsTelecareEur: number;
+  markdownDossier: string;
+};
+
+/**
+ * Generates an actuarial & clinical evidence dossier comparing live Supabase
+ * cohort telemetry against market telecare (24.90 €/mo) and ambient audio (92 €/mo).
+ */
+export function computeB2BPayerEvidenceReport(params: {
+  census: ConsoleCensusRow[];
+  summary: ConsoleCohortSummary | null;
+  qaMetrics: ConsoleQaMetrics | null;
+}): B2BPayerEvidenceReport {
+  const { census, summary, qaMetrics } = params;
+  const activeSeniors = Math.max(summary?.total_seniors ?? 0, census.length);
+  const calls30d = summary?.calls_30d ?? 0;
+  const greenCalls = summary?.green_calls_30d ?? 0;
+  const greenFilteredRatePct =
+    typeof summary?.filter_green_pct === "number"
+      ? Math.round(summary.filter_green_pct)
+      : calls30d > 0
+      ? Math.round((greenCalls / calls30d) * 100)
+      : 0;
+  const savedHumanHours30d = Math.round(((greenCalls * 12) / 60) * 10) / 10;
+  const medAdherencePct =
+    summary && summary.med_evaluated_30d > 0
+      ? Math.round((summary.med_confirmed_30d / summary.med_evaluated_30d) * 100)
+      : null;
+
+  const avgWellbeingPct = summary?.avg_global_pct_30d ?? null;
+  const qaPrecisionPct = qaMetrics?.precision_pct ?? null;
+
+  // Benchmark reference figures: OYE EEA optimized ~8.50 €/mo vs Durcal/Movistar 24.90 €/mo & Sensi 92 €/mo
+  const oyeMonthlyUnitCostEur = 8.5;
+  const classicTelecareEur = 24.9;
+  const ambientSensorsEur = 92.0;
+
+  const savingVsClassicTelecarePct = Math.round(
+    ((classicTelecareEur - oyeMonthlyUnitCostEur) / classicTelecareEur) * 100
+  );
+  const savingVsAmbientSensorsPct = Math.round(
+    ((ambientSensorsEur - oyeMonthlyUnitCostEur) / ambientSensorsEur) * 100
+  );
+  const projectedCohortMonthlySavingVsTelecareEur = Math.round(
+    activeSeniors * (classicTelecareEur - oyeMonthlyUnitCostEur)
+  );
+
+  const lines = [
+    "# OYE · Dossier de Evidencia Clínica & ROI Pagador B2B",
+    `- Cohorte activa monitorizada: **${activeSeniors} personas mayores**`,
+    `- Llamadas completadas (últimos 30 días): **${calls30d}**`,
+    `- Tasa de filtrado autónomo IA (días VERDE sin saturar humanos): **${greenFilteredRatePct}%** (${savedHumanHours30d} h humanas liberadas/mes)`,
+    `- Bienestar medio longitudinal: **${avgWellbeingPct !== null ? `${avgWellbeingPct}%` : "En recopilación"}**`,
+    `- Adherencia terapéutica verificada por voz: **${medAdherencePct !== null ? `${medAdherencePct}%` : "En recopilación"}**`,
+    `- Precisión auditada QA humana: **${qaPrecisionPct !== null ? `${qaPrecisionPct}%` : "Pendiente de auditoría"}**`,
+    `- Coste unitario piloto OYE (EEA/fijo): **~${oyeMonthlyUnitCostEur.toFixed(2)} €/mes** (${savingVsClassicTelecarePct}% menos que reloj/teleasistencia 24,90 €/mes; ${savingVsAmbientSensorsPct}% menos que sensores ambientales ~92 €/mes)`,
+    `- Ahorro mensual estimado sobre teleasistencia clásica para esta cohorte: **${projectedCohortMonthlySavingVsTelecareEur} €/mes**`,
+  ];
+
+  return {
+    activeSeniors,
+    calls30d,
+    greenFilteredRatePct,
+    avgWellbeingPct,
+    medAdherencePct,
+    qaPrecisionPct,
+    savedHumanHours30d,
+    oyeMonthlyUnitCostEur,
+    savingVsClassicTelecarePct,
+    savingVsAmbientSensorsPct,
+    projectedCohortMonthlySavingVsTelecareEur,
+    markdownDossier: lines.join("\n"),
+  };
 }
 
 export function buildFhirR4Bundle(row: ConsoleCensusRow) {

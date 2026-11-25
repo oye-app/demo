@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { FlaskConical, Loader2, Play, ShieldCheck, Sparkles, AlertCircle } from "lucide-react";
+import { AlertCircle, Check, Copy, FlaskConical, Loader2, PhoneIncoming, Play, ShieldAlert, ShieldCheck, Sparkles } from "lucide-react";
 
 type LivePipelineTesterProps = {
   seniorName?: string;
 };
+
+type TesterMode = "analyze" | "inbound" | "midcall";
 
 type SandboxPreset = {
   id: string;
@@ -42,6 +44,9 @@ type SandboxResult = {
   recuerdo_biografico_nuevo?: string | null;
   citas_textuales?: string[];
   summary?: string;
+  auditoria_veracidad?: {
+    cross_check_coherencia?: string;
+  };
   evaluacion_escalas?: {
     soledad_ucla?: { puntuacion_estimada?: number; nivel?: string };
     animo_yesavage_gds5?: { puntuacion_estimada?: number; nivel?: string };
@@ -56,56 +61,114 @@ type SandboxResult = {
         riqueza_lexica_pct?: number;
         palabras_por_respuesta?: number;
         latencia_respuesta_seg?: number | null;
+        latencia_max_seg?: number | null;
+        variabilidad_latencia_seg?: number | null;
+        velocidad_habla_ppm?: number | null;
+        indice_repeticion_tema?: number | null;
       };
     };
   };
 };
 
+type InboundResult = {
+  matched_senior?: boolean;
+  latency_ms?: number;
+  dynamic_variables?: Record<string, string | number>;
+};
+
+type MidCallResult = {
+  ok?: boolean;
+  mode?: string;
+  latency_ms?: number;
+  category?: string;
+  key_contact_name?: string | null;
+  key_contact_phone?: string | null;
+  agent_containment_script?: string;
+};
+
 export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTesterProps) {
+  const [mode, setMode] = useState<TesterMode>("analyze");
   const [transcriptText, setTranscriptText] = useState(PRESETS[0]!.transcript);
+  const [inboundPhone, setInboundPhone] = useState("+34678617031");
+  const [midCallCategory, setMidCallCategory] = useState("caida");
+  const [midCallQuote, setMidCallQuote] = useState("Me he caído al levantarme de la silla");
   const [running, setRunning] = useState(false);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<SandboxResult | null>(null);
+  const [inboundResult, setInboundResult] = useState<InboundResult | null>(null);
+  const [midCallResult, setMidCallResult] = useState<MidCallResult | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const supabaseUrl =
     (import.meta.env["VITE_SUPABASE_URL"] as string | undefined) || "https://lkbplpptjkajtyvcdier.supabase.co";
   const supabaseAnon = import.meta.env["VITE_SUPABASE_ANON_KEY"] as string | undefined;
 
+  const activeEndpointUrl =
+    mode === "analyze"
+      ? `${supabaseUrl}/functions/v1/analyze-call`
+      : mode === "inbound"
+      ? `${supabaseUrl}/functions/v1/inbound-call-context`
+      : `${supabaseUrl}/functions/v1/mid-call-alert`;
+
+  function buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (supabaseAnon) {
+      headers["apikey"] = supabaseAnon;
+      headers["Authorization"] = `Bearer ${supabaseAnon}`;
+    }
+    return headers;
+  }
+
   async function runLiveAudit() {
-    if (!transcriptText.trim() || running) return;
+    if (running) return;
     setRunning(true);
     setErrorMsg(null);
     const t0 = Date.now();
     try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (supabaseAnon) {
-        headers["apikey"] = supabaseAnon;
-        headers["Authorization"] = `Bearer ${supabaseAnon}`;
+      const headers = buildHeaders();
+      if (mode === "analyze") {
+        if (!transcriptText.trim()) return;
+        const res = await fetch(activeEndpointUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            person_id: "test-only-console-audit",
+            conversation_id: `test-only-sandbox-${t0}`,
+            name: seniorName,
+            duration_sec: 68,
+            transcript: transcriptText.trim(),
+          }),
+        });
+        setLatencyMs(Date.now() - t0);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setResult((await res.json()) as SandboxResult);
+      } else if (mode === "inbound") {
+        const res = await fetch(activeEndpointUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ caller_id: inboundPhone.trim() }),
+        });
+        setLatencyMs(Date.now() - t0);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setInboundResult((await res.json()) as InboundResult);
+      } else {
+        const res = await fetch(activeEndpointUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            person_id: "d0000000-0000-4000-8000-000000000001",
+            category: midCallCategory,
+            quote_verbatim: midCallQuote.trim(),
+            dry_run: true,
+          }),
+        });
+        setLatencyMs(Date.now() - t0);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setMidCallResult((await res.json()) as MidCallResult);
       }
-
-      const res = await fetch(`${supabaseUrl}/functions/v1/analyze-call`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          person_id: "test-only-console-audit",
-          conversation_id: `test-only-sandbox-${t0}`,
-          name: seniorName,
-          duration_sec: 68,
-          transcript: transcriptText.trim(),
-        }),
-      });
-      setLatencyMs(Date.now() - t0);
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}${txt ? `: ${txt.slice(0, 140)}` : ""}`);
-      }
-      const data = (await res.json()) as SandboxResult;
-      setResult(data);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Error ejecutando analyze-call");
+      setErrorMsg(err instanceof Error ? err.message : "Error ejecutando sandbox en vivo");
     } finally {
       setRunning(false);
     }
@@ -118,11 +181,11 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
           <div className="flex items-center gap-1.5">
             <FlaskConical className="w-4 h-4 text-indigo-700" />
             <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-950">
-              Sandbox Clínico en Vivo · analyze-call + GPT-4o
+              Sandbox Clínico & Voice Tools ElevenLabs en Vivo
             </h4>
           </div>
           <p className="text-[11px] text-slate-600 mt-0.5">
-            Audita el motor real sin alterar base de datos ni disparar alertas (`person_id: test-only-console-audit`).
+            Audita los 3 motores reales en Supabase sin alterar base de datos ni disparar SMS/alertas reales.
           </p>
         </div>
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white border border-indigo-200 text-[10px] font-bold text-indigo-800">
@@ -130,41 +193,142 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
         </span>
       </div>
 
-      {/* Preset selector */}
-      <div className="flex flex-wrap gap-1.5">
-        {PRESETS.map((p) => (
+      {/* Mode Switcher */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-xl border border-indigo-200 bg-white p-0.5 text-[11px] font-bold">
           <button
-            key={p.id}
             type="button"
             onClick={() => {
-              setTranscriptText(p.transcript);
-              setResult(null);
+              setMode("analyze");
               setErrorMsg(null);
             }}
-            className="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-50 border border-indigo-200 text-[11px] font-semibold text-indigo-900 cursor-pointer"
+            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 ${
+              mode === "analyze" ? "bg-indigo-700 text-white" : "text-slate-600 hover:bg-slate-50"
+            }`}
           >
-            {p.label}
+            <FlaskConical className="w-3 h-3" /> Post-Llamada (GPT-4o)
           </button>
-        ))}
+          <button
+            type="button"
+            onClick={() => {
+              setMode("inbound");
+              setErrorMsg(null);
+            }}
+            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 ${
+              mode === "inbound" ? "bg-indigo-700 text-white" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <PhoneIncoming className="w-3 h-3" /> Entrante 24/7 (Caller ID)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("midcall");
+              setErrorMsg(null);
+            }}
+            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 ${
+              mode === "midcall" ? "bg-rose-700 text-white" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <ShieldAlert className="w-3 h-3" /> Urgencia Intra-Llamada
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            void navigator.clipboard.writeText(activeEndpointUrl).then(() => {
+              setCopiedUrl(true);
+              setTimeout(() => setCopiedUrl(false), 1800);
+            });
+          }}
+          title={activeEndpointUrl}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-mono text-slate-700 hover:bg-slate-50"
+        >
+          {copiedUrl ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+          {copiedUrl ? "Webhook copiado" : activeEndpointUrl.split("/functions/v1/")[1]}
+        </button>
       </div>
 
-      <textarea
-        aria-label="Transcripción de prueba para auditoría clínica"
-        rows={4}
-        value={transcriptText}
-        onChange={(e) => setTranscriptText(e.target.value)}
-        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-      />
+      {mode === "analyze" ? (
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            {PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  setTranscriptText(p.transcript);
+                  setResult(null);
+                  setErrorMsg(null);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-50 border border-indigo-200 text-[11px] font-semibold text-indigo-900 cursor-pointer"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <textarea
+            aria-label="Transcripción de prueba para auditoría clínica"
+            rows={4}
+            value={transcriptText}
+            onChange={(e) => setTranscriptText(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+        </>
+      ) : mode === "inbound" ? (
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-center">
+          <input
+            type="tel"
+            aria-label="Teléfono entrante (Caller ID)"
+            value={inboundPhone}
+            onChange={(e) => setInboundPhone(e.target.value)}
+            placeholder="+34678617031"
+            className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-mono text-slate-800"
+          />
+          <span className="text-[11px] text-slate-500">
+            Resuelve ficha, medicación, recuerdos y plan de barrio en vivo.
+          </span>
+        </div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-[160px_1fr]">
+          <select
+            aria-label="Categoría de urgencia simulada"
+            value={midCallCategory}
+            onChange={(e) => setMidCallCategory(e.target.value)}
+            className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold"
+          >
+            <option value="caida">Caída en domicilio</option>
+            <option value="dolor_pecho">Dolor torácico</option>
+            <option value="ahogo">Falta de aire</option>
+            <option value="desorientacion">Desorientación severa</option>
+          </select>
+          <input
+            type="text"
+            aria-label="Cita literal de emergencia"
+            value={midCallQuote}
+            onChange={(e) => setMidCallQuote(e.target.value)}
+            className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs"
+          />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button
           type="button"
-          disabled={running || !transcriptText.trim()}
+          disabled={running || (mode === "analyze" && !transcriptText.trim())}
           onClick={() => void runLiveAudit()}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition cursor-pointer"
         >
           {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-          {running ? "Analizando con GPT-4o..." : "Ejecutar auditoría en vivo"}
+          {running
+            ? "Ejecutando..."
+            : mode === "analyze"
+            ? "Ejecutar auditoría en vivo"
+            : mode === "inbound"
+            ? "Probar identificación Caller ID"
+            : "Simular alerta <2s (dry_run)"}
         </button>
 
         {latencyMs !== null && !running && (
@@ -181,7 +345,7 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
         </div>
       )}
 
-      {result && (
+      {mode === "analyze" && result && (
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -208,7 +372,7 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
 
           {result.summary && <p className="text-xs text-slate-700 leading-relaxed">{result.summary}</p>}
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
             <div className="rounded-lg bg-slate-50 border border-slate-200/70 px-2.5 py-1.5">
               <p className="text-[10px] font-bold uppercase text-slate-400">UCLA-3</p>
               <p className="font-bold text-slate-800 tabular-nums">
@@ -231,6 +395,19 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
               <p className="text-[10px] font-bold uppercase text-slate-400">Riqueza léxica</p>
               <p className="font-bold text-slate-800 tabular-nums">
                 {result.evaluacion_escalas?.indicadores_vocales_cognitivos?.biomarcadores?.riqueza_lexica_pct ?? "—"}%
+              </p>
+            </div>
+            <div className="rounded-lg bg-slate-50 border border-slate-200/70 px-2.5 py-1.5">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Repetición / PPM</p>
+              <p className="font-bold text-slate-800 tabular-nums">
+                {result.evaluacion_escalas?.indicadores_vocales_cognitivos?.biomarcadores?.indice_repeticion_tema !==
+                undefined &&
+                result.evaluacion_escalas?.indicadores_vocales_cognitivos?.biomarcadores?.indice_repeticion_tema !== null
+                  ? `${Math.round(
+                      result.evaluacion_escalas.indicadores_vocales_cognitivos.biomarcadores.indice_repeticion_tema * 100
+                    )}%`
+                  : "—"}{" "}
+                · {result.evaluacion_escalas?.indicadores_vocales_cognitivos?.biomarcadores?.velocidad_habla_ppm ?? "—"} ppm
               </p>
             </div>
           </div>
@@ -269,6 +446,56 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
               </ul>
             </div>
           )}
+        </div>
+      )}
+
+      {mode === "inbound" && inboundResult?.dynamic_variables && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                inboundResult.matched_senior ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              {inboundResult.matched_senior
+                ? `Identificado: ${String(inboundResult.dynamic_variables["name"] || "")}`
+                : "Número no registrado"}
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+              enfoque: {String(inboundResult.dynamic_variables["clinical_focus_mode"] || "")}
+            </span>
+          </div>
+          {inboundResult.dynamic_variables["neighborhood_plan"] && (
+            <p className="text-[11px] text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5">
+              <strong>Prescripción social de hoy:</strong>{" "}
+              {String(inboundResult.dynamic_variables["neighborhood_plan"])}
+            </p>
+          )}
+          {inboundResult.dynamic_variables["pending_followups"] && (
+            <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+              <strong>Seguimiento abierto:</strong> {String(inboundResult.dynamic_variables["pending_followups"])}
+            </p>
+          )}
+          <p className="text-[11px] text-slate-600">
+            <strong>Contacto con llave:</strong> {String(inboundResult.dynamic_variables["key_contact"] || "No asignado")}
+          </p>
+        </div>
+      )}
+
+      {mode === "midcall" && midCallResult && (
+        <div className="rounded-xl border border-rose-200 bg-white p-3.5 space-y-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800">
+              {midCallResult.mode === "dry_run" ? "Simulación segura (dry_run)" : "Despacho activo"}
+            </span>
+            <span className="text-[11px] font-bold text-slate-700">
+              Llave: {midCallResult.key_contact_name || "No registrado"}{" "}
+              {midCallResult.key_contact_phone ? `(${midCallResult.key_contact_phone})` : ""}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-700 italic bg-rose-50/50 border border-rose-100 rounded-lg px-3 py-2">
+            «{midCallResult.agent_containment_script}»
+          </p>
         </div>
       )}
     </div>

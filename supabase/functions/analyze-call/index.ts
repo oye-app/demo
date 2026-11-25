@@ -405,6 +405,7 @@ function analyzeSpanishConversation(params: {
     lonelinessQuote = extractedQuotes[0];
   }
 
+  const ruleUclaScore = uclaScore3to9;
   if (typeof rawAiReport?.soledad_ucla_puntos === "number" && Number.isFinite(rawAiReport.soledad_ucla_puntos)) {
     uclaScore3to9 = Math.max(3, Math.min(9, Math.round(rawAiReport.soledad_ucla_puntos)));
     const verifiedSocialEv = verifyQuotesAgainstTranscript(
@@ -443,6 +444,7 @@ function analyzeSpanishConversation(params: {
     moodQuote = extractedQuotes[0];
   }
 
+  const ruleGdsScore = gdsScore;
   if (typeof rawAiReport?.animo_yesavage_puntos === "number" && Number.isFinite(rawAiReport.animo_yesavage_puntos)) {
     const aiGds = Math.max(0, Math.min(5, Math.round(rawAiReport.animo_yesavage_puntos)));
     gdsScore = severeMoodMatch ? Math.max(gdsScore, aiGds) : aiGds;
@@ -453,6 +455,11 @@ function analyzeSpanishConversation(params: {
     );
     moodQuote = verifiedMoodEv[0] || moodQuote;
   }
+
+  const scaleDivergence = Math.abs(uclaScore3to9 - ruleUclaScore) >= 3 || Math.abs(gdsScore - ruleGdsScore) >= 3;
+  const crossCheckCoherencia: "coincide" | "llm_amplia_contexto" = scaleDivergence
+    ? "llm_amplia_contexto"
+    : "coincide";
 
   // 8. Calculate Self-Care Score (0 to 3)
   let autoPoints = 0;
@@ -537,6 +544,75 @@ function analyzeSpanishConversation(params: {
     responseLatencies.length > 0
       ? Math.round((responseLatencies.reduce((a, b) => a + b, 0) / responseLatencies.length) * 10) / 10
       : null;
+  const latenciaMaxSeg = responseLatencies.length > 0 ? Math.max(...responseLatencies) : null;
+  const variabilidadLatenciaSeg =
+    responseLatencies.length >= 2
+      ? Math.round(
+          Math.sqrt(
+            responseLatencies.reduce(
+              (acc, x) => acc + Math.pow(x - (latenciaRespuestaSeg ?? 0), 2),
+              0
+            ) / responseLatencies.length
+          ) * 10
+        ) / 10
+      : null;
+
+  // Estimated speaking rate (words per user speaking minute across call duration)
+  const velocidadHablaPpm =
+    durationSec >= 10 && userWordCount >= 4
+      ? Math.round((userWordCount / Math.max(durationSec * 0.45, 8)) * 60)
+      : null;
+
+  // Intra-call semantic bigram repetition index (detects same idea repeated verbatim/near-verbatim across turns)
+  const turnBigramSets = userTurns
+    .map((t) =>
+      t.text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 2)
+    )
+    .filter((toks) => toks.length >= 5)
+    .map((toks) => {
+      const bg = new Set<string>();
+      for (let k = 0; k < toks.length - 1; k++) bg.add(`${toks[k]}_${toks[k + 1]}`);
+      return bg;
+    });
+  let indiceRepeticionTema = 0;
+  for (let i = 0; i < turnBigramSets.length; i++) {
+    for (let j = i + 1; j < turnBigramSets.length; j++) {
+      const a = turnBigramSets[i];
+      const b = turnBigramSets[j];
+      let inter = 0;
+      for (const gram of a) {
+        if (b.has(gram)) inter++;
+      }
+      const union = a.size + b.size - inter;
+      if (union > 0) {
+        indiceRepeticionTema = Math.max(indiceRepeticionTema, inter / union);
+      }
+    }
+  }
+  indiceRepeticionTema = Math.round(indiceRepeticionTema * 100) / 100;
+
+  let tendenciaIntraLlamada: "mejora_durante_charla" | "estable" | "cierre_fatiga" = "estable";
+  if (userTurns.length >= 2) {
+    const mid = Math.ceil(userTurns.length / 2);
+    const firstAvg =
+      userTurns.slice(0, mid).reduce((s, t) => s + t.text.split(/\s+/).filter(Boolean).length, 0) / mid;
+    const secondSlice = userTurns.slice(mid);
+    const secondAvg =
+      secondSlice.length > 0
+        ? secondSlice.reduce((s, t) => s + t.text.split(/\s+/).filter(Boolean).length, 0) / secondSlice.length
+        : firstAvg;
+    if (secondAvg >= firstAvg * 1.25 && secondAvg >= 8) {
+      tendenciaIntraLlamada = "mejora_durante_charla";
+    } else if (firstAvg >= 10 && secondAvg <= firstAvg * 0.55) {
+      tendenciaIntraLlamada = "cierre_fatiga";
+    }
+  }
 
   const priorLexValues = priorCalls.map((c) => c.lexPct).filter((v): v is number => typeof v === "number");
   const priorWordsValues = priorCalls.map((c) => c.avgWords).filter((v): v is number => typeof v === "number");
@@ -916,6 +992,11 @@ function analyzeSpanishConversation(params: {
           palabras_por_respuesta: avgWordsPerTurn,
           riqueza_lexica_pct: riquezaLexicaPct,
           latencia_respuesta_seg: latenciaRespuestaSeg,
+          latencia_max_seg: latenciaMaxSeg,
+          variabilidad_latencia_seg: variabilidadLatenciaSeg,
+          velocidad_habla_ppm: velocidadHablaPpm,
+          indice_repeticion_tema: indiceRepeticionTema,
+          tendencia_intra_llamada: tendenciaIntraLlamada,
           comparativa_previa: lexComparativa,
           baseline_riqueza_pct: baselineLexAvg,
           baseline_palabras_resp: baselineWordsAvg,
@@ -954,6 +1035,7 @@ function analyzeSpanishConversation(params: {
     auditoria_veracidad: {
       analyzer_model: analyzerModel,
       call_validity: validity.callValidity,
+      cross_check_coherencia: crossCheckCoherencia,
       user_turns_count: userTurns.length,
       user_words_count: userWordCount,
       verified_quotes_count: extractedQuotes.length,
@@ -1226,7 +1308,7 @@ Deno.serve(async (req: Request) => {
     });
 
     // Directly persist the report into public.call_logs using SUPABASE_SERVICE_ROLE_KEY as an immediate guarantee
-    if (sb && !personId.startsWith("test-only")) {
+    if (sb && !personId.startsWith("test-only") && !body.skip_db_write) {
       try {
 
         let targetConvId = conversationId;
