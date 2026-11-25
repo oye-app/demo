@@ -1,6 +1,19 @@
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { AlertCircle, CheckCircle2, Clock, PauseCircle, PhoneCall } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Loader2, PauseCircle, PhoneCall, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import { computeTodayScheduleCoverage, type ConsoleCensusRow } from "@/lib/console";
+
+type WatchdogSummary = {
+  stuck_calls_found: number;
+  stuck_calls_healed: number;
+  sla_warning_30m: number;
+  sla_critical_60m: number;
+  no_answer_retry_candidates: number;
+  quiet_hours_blocked: boolean;
+};
 
 export function DailyAgendaPanel({
   census,
@@ -9,8 +22,50 @@ export function DailyAgendaPanel({
   census: ConsoleCensusRow[];
   onInspect: (seniorId: string) => void;
 }) {
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const agenda = computeTodayScheduleCoverage(census);
+  const [watchdogBusy, setWatchdogBusy] = useState(false);
+  const [watchdogSummary, setWatchdogSummary] = useState<WatchdogSummary | null>(null);
+
+  async function runSlaWatchdog() {
+    setWatchdogBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        toast.error("Debes iniciar sesión como operador para ejecutar la vigilancia SLA.");
+        return;
+      }
+      const supabaseUrl =
+        (import.meta.env["VITE_SUPABASE_URL"] as string | undefined) || "https://lkbplpptjkajtyvcdier.supabase.co";
+      const anon = import.meta.env["VITE_SUPABASE_ANON_KEY"] as string | undefined;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      };
+      if (anon) headers["apikey"] = anon;
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/sla-watchdog`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ heal_stuck_calls: true, dispatch_retries: false }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as WatchdogSummary;
+      setWatchdogSummary(data);
+      await qc.invalidateQueries({ queryKey: ["console"] });
+      toast.success(
+        data.stuck_calls_healed > 0
+          ? `Watchdog SLA: ${data.stuck_calls_healed} llamada(s) recuperadas`
+          : "Watchdog SLA ejecutado · Sin llamadas colgadas"
+      );
+    } catch {
+      toast.error("No se pudo ejecutar el Watchdog SLA");
+    } finally {
+      setWatchdogBusy(false);
+    }
+  }
 
   const badgeStyle = {
     completed_today: "bg-success/15 text-success",
@@ -35,7 +90,30 @@ export function DailyAgendaPanel({
             Control horario (Madrid, hora actual {String(agenda.madridHour).padStart(2, "0")}:00 h) para garantizar cero puntos ciegos diarios.
           </p>
         </div>
+
+        <button
+          type="button"
+          disabled={watchdogBusy}
+          onClick={() => void runSlaWatchdog()}
+          className="inline-flex items-center gap-1.5 rounded-xl border bg-card px-3.5 py-2 text-xs font-bold text-foreground shadow-xs hover:bg-secondary disabled:opacity-50 print:hidden"
+        >
+          {watchdogBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5 text-primary" />}
+          Auditar &amp; Sanear SLA
+        </button>
       </div>
+
+      {watchdogSummary && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-xs">
+          <span className="font-bold text-primary">Watchdog SLA activo:</span>
+          <span>Colgadas saneadas: <strong>{watchdogSummary.stuck_calls_healed}</strong></span>
+          <span>· SLA &gt;30m: <strong>{watchdogSummary.sla_warning_30m}</strong></span>
+          <span>· SLA &gt;60m: <strong>{watchdogSummary.sla_critical_60m}</strong></span>
+          <span>· Rellamadas elegibles: <strong>{watchdogSummary.no_answer_retry_candidates}</strong></span>
+          {watchdogSummary.quiet_hours_blocked && (
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold">Horario silencio nocturno activo</span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 text-xs">
         <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4">

@@ -753,5 +753,11 @@ describe("OYE Consola Web Desktop & Lógica Clínica N1", () => {
     expect(evidence.savingVsClassicTelecarePct).toBe(66);
     expect(evidence.savingVsAmbientSensorsPct).toBe(91);
     expect(evidence.markdownDossier).toContain("96%");
+
+    const fhirJson = JSON.stringify(buildFhirR4Bundle(makeSenior()));
+    expect(fhirJson).toContain("https://loinc.org");
+    expect(fhirJson).toContain("106418-7");
+    expect(fhirJson).toContain("48545-8");
+    expect(fhirJson).toContain("fullUrl");
   });
 });

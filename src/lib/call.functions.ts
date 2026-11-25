@@ -44,7 +44,7 @@ export const startCall = createServerFn({ method: "POST" })
     // 1. Fetch senior details
     const { data: senior, error: seniorError } = await context.supabase
       .from("seniors")
-      .select("id, name, phone, age")
+      .select("id, name, phone, age, neighborhood")
       .eq("id", personId)
       .maybeSingle();
 
@@ -74,34 +74,42 @@ export const startCall = createServerFn({ method: "POST" })
       );
     }
 
-    // 3. Load relationship, longitudinal call history, and care sheet in parallel
-    const [{ data: link }, { data: recentCompleted }, { data: seniorCare }] = await Promise.all([
-      context.supabase
-        .from("person_links")
-        .select("relation")
-        .eq("user_id", context.userId)
-        .eq("senior_id", personId)
-        .maybeSingle(),
-      context.supabase
-        .from("call_logs")
-        .select("nivel_alerta, global_pct, motivo, created_at, report")
-        .eq("person_id", personId)
-        .eq("status", "completada")
-        .order("created_at", { ascending: false })
-        .limit(3),
-      context.supabase
-        .from("senior_care")
-        .select("key_contact_name, key_contact_phone, meds, appointments, birthday")
-        .eq("senior_id", personId)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+    // 3. Load relationship, longitudinal call history, care sheet, and neighborhood resources in parallel
+    const [{ data: link }, { data: recentCompleted }, { data: seniorCare }, { data: communityResources }] =
+      await Promise.all([
+        context.supabase
+          .from("person_links")
+          .select("relation")
+          .eq("user_id", context.userId)
+          .eq("senior_id", personId)
+          .maybeSingle(),
+        context.supabase
+          .from("call_logs")
+          .select("nivel_alerta, global_pct, motivo, created_at, report")
+          .eq("person_id", personId)
+          .eq("status", "completada")
+          .order("created_at", { ascending: false })
+          .limit(5),
+        context.supabase
+          .from("senior_care")
+          .select("key_contact_name, key_contact_phone, meds, appointments, birthday")
+          .eq("senior_id", personId)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        context.supabase
+          .from("community_resources")
+          .select("name, category, neighborhood, schedule, active")
+          .eq("active", true)
+          .limit(20),
+      ]);
 
     const relationship = link?.relation?.trim() || "Familiar";
     const outboundContext = buildOutboundCallContext({
       recentCompleted: recentCompleted ?? [],
       seniorCare: seniorCare ?? null,
+      communityResources: communityResources ?? [],
+      neighborhood: senior.neighborhood,
     });
 
     // 4. Format phone strictly to E.164 without spaces (defaulting to verified +34678617031 if empty)

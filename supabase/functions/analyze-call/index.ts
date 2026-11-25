@@ -268,8 +268,12 @@ function analyzeSpanishConversation(params: {
     fallbackQuoteList
   );
 
-  // 1. Detect Emergency / Red Flags strictly from USER speech
-  const emergencyMatch = userFullText.match(
+  // 1. Detect Emergency / Red Flags strictly from USER speech (with explicit negation guards)
+  const emergencySanitizedText = userFullText.replace(
+    /\b(?:no|nunca|tampoco|sin|ya\s+no)\s+(?:me\s+he\s+ca[ií]do|me\s+ca[ií]|estoy\s+en\s+el\s+suelo|me\s+duele\s+(?:mucho\s+)?el\s+pecho|tengo\s+dolor\s+en\s+el\s+pecho|me\s+ahogo|me\s+desmayo|ca[ií]das)\b/gi,
+    " "
+  );
+  const emergencyMatch = emergencySanitizedText.match(
     /(me he ca[ií]do|me ca[ií]|estoy en el suelo|no puedo levantarme|duele mucho el pecho|dolor en el pecho|me ahogo|no puedo respirar|falta el aire|sangr[aeo]|me desmayo|no quiero vivir|quitarme la vida|mejor muert[ao]|socorro|ayuda urgente|auxilio)/i
   );
 
@@ -307,7 +311,7 @@ function analyzeSpanishConversation(params: {
       clauses.find((c) => /(?:^|[^a-záéíóúüñ0-9_])(dorm[ií]|dormid[oa]|noche|descans[eé]|descansad[oa]|insomnio|desvelad[ao]|despert[eé]|pegu[eé] ojo)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)) ||
       (qAboutSleep ? clauses[0] || userA : "");
     if (sleepClause) {
-      sleepQuote = userA;
+      sleepQuote = sleepClause;
       if (/(?:^|[^a-záéíóúüñ0-9_])(fatal|muy mal|no dorm[ií]|no he dormido|no pegu[eé] ojo|en vela|casi nada|despert[eé] muchas)(?=$|[^a-záéíóúüñ0-9_])/i.test(sleepClause)) {
         sleepStatus = "ALERTA";
       } else if (
@@ -316,7 +320,7 @@ function analyzeSpanishConversation(params: {
         )
       ) {
         sleepStatus = "INSOMNIO_FATIGA";
-      } else if (/(?:^|[^a-záéíóúüñ0-9_])(bastante bien|muy bien|bien|estupend|fenomenal|toda la noche|de un tir[oó]n|descans[eé]|s[ií])(?=$|[^a-záéíóúüñ0-9_])/i.test(sleepClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(bastante bien|muy bien|b[aá]rbaro|re bien|bien|estupend|fenomenal|toda la noche|de un tir[oó]n|descans[eé]|s[ií])(?=$|[^a-záéíóúüñ0-9_])/i.test(sleepClause)) {
         sleepStatus = "CORRECTO";
       }
     }
@@ -325,23 +329,23 @@ function analyzeSpanishConversation(params: {
     sleepStatus = rawAiReport.sueno_descanso;
   }
 
-  // 4. Analyze Food / Alimentación (Q&A and clause aware, including common STT homophones like "desafiné" -> "desayuné")
+  // 4. Analyze Food / Alimentación (Q&A and clause aware, Pan-Hispanic + STT homophone safe)
   let foodStatus: "CORRECTO" | "DESCUIDO" | "ALERTA" | "NO_MENCIONADO" = "NO_MENCIONADO";
   let foodQuote = "";
   for (const { agentQ, userA } of qaPairs) {
-    const qAboutFood = /\b(desayun|comid[oa]|comer|cenar|cenad[oa]|almuerz|apetito|hambre|cocin|calentito)\b/i.test(agentQ);
+    const qAboutFood = /\b(desayun|comid[oa]|comer|cenar|cenad[oa]|almuerz|almorc|meriend|merend|apetito|hambre|cocin|calentito)\b/i.test(agentQ);
     const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
     const foodClause =
       clauses.find((c) =>
-        /(?:^|[^a-záéíóúüñ0-9_])(desayun\w*|desafin\w*|com[ií]\w*|comid[oa]|cen[eé]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|pur[eé]|pan|yogur|galleta\w*|hambre|apetito|cocin\w*)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)
-      ) || (qAboutFood && !/\bpastilla|medicaci|medicamento/i.test(userA) ? clauses[0] || userA : "");
+        /(?:^|[^a-záéíóúüñ0-9_])(desayun\w*|desafin\w*|com[ií]\w*|comid[oa]|cen[eé]\w*|almorc\w*|almuerz\w*|merend\w*|caf[eé]|mate|t[eé]|tostada\w*|medialuna\w*|leche|fruta|sopa|caldo|lentejas|pur[eé]|pan|yogur|galleta\w*|hambre|apetito|cocin\w*)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)
+      ) || (qAboutFood && !/\bpastilla|medicaci|medicamento|remedio/i.test(userA) ? clauses[0] || userA : "");
     if (foodClause) {
-      foodQuote = userA;
-      if (/(?:^|[^a-záéíóúüñ0-9_])(no he comido nada|sin comer|no tengo nada de hambre|no quiero comer|no desayun[eé])(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
+      foodQuote = foodClause;
+      if (/(?:^|[^a-záéíóúüñ0-9_])(no he comido nada|no com[ií] nada|sin comer|no tengo nada de hambre|no quiero comer|no desayun[eé]|no almorc[eé])(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
         foodStatus = "ALERTA";
       } else if (/(?:^|[^a-záéíóúüñ0-9_])(todav[ií]a no|a[uú]n no|poca hambre|no ten[ií]a\s*(?:mucha\s*)?hambre|muy poco|sin ganas|solo un poco|casi nada|no he desayunado)(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
         foodStatus = "DESCUIDO";
-      } else if (/(?:^|[^a-záéíóúüñ0-9_])(s[ií]|desayun\w*|com[ií]\w*|caf[eé]|tostada\w*|leche|fruta|sopa|caldo|lentejas|bien|ya tom[eé])(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(s[ií]|desayun\w*|com[ií]\w*|almorc\w*|merend\w*|caf[eé]|mate|tostada\w*|leche|fruta|sopa|caldo|lentejas|bien|ya tom[eé])(?=$|[^a-záéíóúüñ0-9_])/i.test(foodClause)) {
         foodStatus = "CORRECTO";
       }
     }
@@ -351,22 +355,22 @@ function analyzeSpanishConversation(params: {
     foodStatus = rawAiReport.alimentacion_hidratacion;
   }
 
-  // 5. Analyze Medication / Adherencia (Q&A and clause aware)
+  // 5. Analyze Medication / Adherencia (Q&A and clause aware, Spain + LatAm idioms)
   let medStatus: "CONFIRMADA" | "DUDOSA" | "NO_TOMADA" | "NO_MENCIONADA" = "NO_MENCIONADA";
   let medQuote = "";
   for (const { agentQ, userA } of qaPairs) {
-    const qAboutMed = /\b(pastilla|medicaci[oó]n|medicamento|tratamiento|tensi[oó]n|enalapril|sintrom|dosis)/i.test(agentQ);
+    const qAboutMed = /\b(pastilla|remedio|medicaci[oó]n|medicamento|tratamiento|tensi[oó]n|enalapril|sintrom|dosis)/i.test(agentQ);
     const clauses = userA.split(/(?:,\s*pero\b|\bpero\b|;|\.)/i).map((c) => c.trim()).filter(Boolean);
     const medClause =
-      clauses.find((c) => /(?:^|[^a-záéíóúüñ0-9_])(pastilla|medicaci[oó]n|medicamento|enalapril|sintrom|me la tom[eé]|ya la tom[eé]|olvid[eé]|olvid[oó]|se me hab[ií]a pasado|no me la he tomado)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)) ||
+      clauses.find((c) => /(?:^|[^a-záéíóúüñ0-9_])(pastilla|remedios?|medicaci[oó]n|medicamento|enalapril|sintrom|me l[ao]s? tom[eé]|ya l[ao]s? tom[eé]|olvid[eé]|olvid[oó]|se me hab[ií]a pasado|no me l[ao] he tomado)(?=$|[^a-záéíóúüñ0-9_])/i.test(c)) ||
       (qAboutMed ? clauses[0] || userA : "");
     if (medClause) {
-      medQuote = userA;
-      if (/(?:^|[^a-záéíóúüñ0-9_])(no me la he tomado|no la tom[eé]|me olvid[eé]|se me olvid[oó]|se me ha olvidado|se me hab[ií]a pasado|todav[ií]a no|a[uú]n no)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
+      medQuote = medClause;
+      if (/(?:^|[^a-záéíóúüñ0-9_])(no me l[ao] he tomado|no l[ao] tom[eé]|me olvid[eé]|se me olvid[oó]|se me ha olvidado|se me hab[ií]a pasado|todav[ií]a no|a[uú]n no)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
         medStatus = "NO_TOMADA";
-      } else if (/(?:^|[^a-záéíóúüñ0-9_])(no me acuerdo|no s[eé] si|creo que|duda|luego me la tomo)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(no me acuerdo|no s[eé] si|creo que|duda|luego me l[ao] tomo)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
         medStatus = "DUDOSA";
-      } else if (/(?:^|[^a-záéíóúüñ0-9_])(s[ií]|ya me la tom[eé]|me la tom[eé]|tomada|como siempre|ya la he tomado|claro|por supuesto)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
+      } else if (/(?:^|[^a-záéíóúüñ0-9_])(s[ií]|ya me l[ao] tom[eé]|me l[ao] tom[eé]|tomad[ao]|como siempre|ya l[ao] he tomado|claro|por supuesto)(?=$|[^a-záéíóúüñ0-9_])/i.test(medClause)) {
         medStatus = "CONFIRMADA";
       }
     }
@@ -1007,7 +1011,7 @@ function analyzeSpanishConversation(params: {
     motivos_clinicos: Array.isArray(rawAiReport?.motivos_clinicos) ? rawAiReport.motivos_clinicos : [],
     recuerdo_biografico_nuevo:
       typeof rawAiReport?.recuerdo_biografico_nuevo === "string" && rawAiReport.recuerdo_biografico_nuevo.trim().length > 5
-        ? rawAiReport.recuerdo_biografico_nuevo.trim()
+        ? verifyQuotesAgainstTranscript([rawAiReport.recuerdo_biografico_nuevo.trim()], userFullText, [])[0] ?? null
         : null,
     prescripcion_y_derivacion_humana: {
       activar_protocolo_voy_yo,

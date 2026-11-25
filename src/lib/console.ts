@@ -1576,21 +1576,26 @@ export function computeB2BPayerEvidenceReport(params: {
 
 export function buildFhirR4Bundle(row: ConsoleCensusRow) {
   const nowIso = row.latest_call_at || new Date().toISOString();
+  const patientRef = `Patient/${row.senior_id}`;
   const entries: Record<string, unknown>[] = [
     {
+      fullUrl: `https://oye.app/fhir/Patient/${row.senior_id}`,
       resource: {
         resourceType: "Patient",
         id: row.senior_id,
+        active: row.active,
+        identifier: [{ system: "urn:oye:senior-id", value: row.senior_id }],
         name: [{ text: row.name }],
         telecom: row.phone ? [{ system: "phone", value: row.phone }] : [],
         address: [{ district: row.neighborhood || "Chamberí", country: "ES" }],
       },
     },
     {
+      fullUrl: `https://oye.app/fhir/RiskAssessment/${row.senior_id}`,
       resource: {
         resourceType: "RiskAssessment",
         status: "final",
-        subject: { reference: `Patient/${row.senior_id}` },
+        subject: { reference: patientRef },
         occurrenceDateTime: nowIso,
         prediction: [
           {
@@ -1619,25 +1624,34 @@ export function buildFhirR4Bundle(row: ConsoleCensusRow) {
 
   if (row.latest_global_pct !== null) {
     entries.push({
+      fullUrl: `https://oye.app/fhir/Observation/${row.senior_id}-wellbeing`,
       resource: {
         resourceType: "Observation",
         status: "final",
         category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "survey" }] }],
-        code: { text: "Índice Global de Bienestar OYE (%)" },
-        subject: { reference: `Patient/${row.senior_id}` },
+        code: {
+          coding: [{ system: "https://oye.app/fhir/metrics", code: "wellbeing-index-pct", display: "OYE Global Wellbeing Index" }],
+          text: "Índice Global de Bienestar OYE (%)",
+        },
+        subject: { reference: patientRef },
         effectiveDateTime: nowIso,
-        valueQuantity: { value: row.latest_global_pct, unit: "%" },
+        valueQuantity: { value: row.latest_global_pct, unit: "%", system: "http://unitsofmeasure.org", code: "%" },
       },
     });
   }
 
   if (row.latest_ucla_score !== null) {
     entries.push({
+      fullUrl: `https://oye.app/fhir/Observation/${row.senior_id}-ucla3`,
       resource: {
         resourceType: "Observation",
         status: "final",
-        code: { text: "UCLA 3-Item Loneliness Scale (estimación conversacional)" },
-        subject: { reference: `Patient/${row.senior_id}` },
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "survey" }] }],
+        code: {
+          coding: [{ system: "https://loinc.org", code: "106418-7", display: "Three-Item Loneliness Scale" }],
+          text: "UCLA 3-Item Loneliness Scale (estimación conversacional)",
+        },
+        subject: { reference: patientRef },
         effectiveDateTime: nowIso,
         valueInteger: row.latest_ucla_score,
       },
@@ -1646,11 +1660,16 @@ export function buildFhirR4Bundle(row: ConsoleCensusRow) {
 
   if (row.latest_yesavage_score !== null) {
     entries.push({
+      fullUrl: `https://oye.app/fhir/Observation/${row.senior_id}-gds5`,
       resource: {
         resourceType: "Observation",
         status: "final",
-        code: { text: "Yesavage GDS-5 Screening Ánimo (estimación conversacional)" },
-        subject: { reference: `Patient/${row.senior_id}` },
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "survey" }] }],
+        code: {
+          coding: [{ system: "https://loinc.org", code: "48545-8", display: "Geriatric depression scale (GDS) short version total" }],
+          text: "Yesavage GDS-5 Screening Ánimo (estimación conversacional)",
+        },
+        subject: { reference: patientRef },
         effectiveDateTime: nowIso,
         valueInteger: row.latest_yesavage_score,
       },
@@ -1659,13 +1678,18 @@ export function buildFhirR4Bundle(row: ConsoleCensusRow) {
 
   if (row.latest_riqueza_lexica !== null) {
     entries.push({
+      fullUrl: `https://oye.app/fhir/Observation/${row.senior_id}-vocal-lex`,
       resource: {
         resourceType: "Observation",
         status: "final",
-        code: { text: "Biomarcador Vocal · Riqueza Léxica (%)" },
-        subject: { reference: `Patient/${row.senior_id}` },
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "exam" }] }],
+        code: {
+          coding: [{ system: "https://oye.app/fhir/biomarkers", code: "vocal-lexical-richness-pct", display: "Conversational Lexical Richness" }],
+          text: "Biomarcador Vocal · Riqueza Léxica (%)",
+        },
+        subject: { reference: patientRef },
         effectiveDateTime: nowIso,
-        valueQuantity: { value: row.latest_riqueza_lexica, unit: "%" },
+        valueQuantity: { value: row.latest_riqueza_lexica, unit: "%", system: "http://unitsofmeasure.org", code: "%" },
       },
     });
   }
