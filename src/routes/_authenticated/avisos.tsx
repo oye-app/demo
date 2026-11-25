@@ -7,6 +7,7 @@ import { useMe } from "@/lib/auth";
 import { forVolunteer, minutesWaiting, useAlerts, waitLabel } from "@/lib/alerts";
 import { personDisplayName } from "@/lib/person-presentation";
 import { PersonAvatar } from "@/components/person-avatar";
+import { useDeviceMode } from "@/lib/device-mode";
 
 export const Route = createFileRoute("/_authenticated/avisos")({
   head: () => ({
@@ -28,9 +29,49 @@ function useTick(ms = 30_000) {
 }
 
 function Avisos() {
-  const {user}=useMe();
-  const {data=[],isLoading,error}=useAlerts(true);
-  const active=data.find(a=>a.volunteer_id===user.id && ["accepted","arrived"].includes(a.status));
-  const open=data.filter(a=>a.status==="open");
-  return <Screen title="Avisos para ti"><div className="min-h-0 flex-1 overflow-y-auto">{active&&<Link to="/" search={{sid:active.senior_id??undefined,aid:active.id}} className="tap mb-4 flex min-h-16 items-center gap-3 rounded-xl bg-secondary p-3 font-bold text-primary"><PersonAvatar id={active.senior_id} name={active.senior_name} small />Visita en curso · {personDisplayName(active.senior_name)}</Link>}{open.map(a=><Link key={a.id} to="/" search={{sid:a.senior_id??undefined,aid:a.id}} className="tap flex min-h-24 items-center gap-3 border-b py-3"><PersonAvatar id={a.senior_id} name={a.senior_name} /><span className="min-w-0 flex-1"><span className="block text-lg font-bold">{personDisplayName(a.senior_name)}</span><span className="block text-sm text-muted-foreground">{a.neighborhood} · Espera {waitLabel(minutesWaiting(a.created_at))}</span></span></Link>)}{error&&<p role="alert">No se pudieron cargar los avisos.</p>}{!isLoading&&!open.length&&<p className="py-8 text-center text-muted-foreground">No hay avisos nuevos.</p>}</div></Screen>;
+  const { user } = useMe();
+  const { isDesktop } = useDeviceMode();
+  const { data = [], isLoading, error } = useAlerts(true);
+  const active = data.find((a) => a.volunteer_id === user.id && ["accepted", "arrived"].includes(a.status));
+  const open = data.filter((a) => a.status === "open");
+  return (
+    <Screen title="Avisos para ti">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-4">
+        {active && (
+          <Link
+            to="/"
+            search={{ sid: active.senior_id ?? undefined, aid: active.id }}
+            className="tap flex min-h-16 items-center gap-3 rounded-2xl border border-primary/30 bg-secondary p-4 font-bold text-primary"
+          >
+            <PersonAvatar id={active.senior_id} name={active.senior_name} small />
+            Visita en curso · {personDisplayName(active.senior_name)}
+          </Link>
+        )}
+        <div className={isDesktop ? "grid gap-3 md:grid-cols-2" : "divide-y"}>
+          {open.map((a) => (
+            <Link
+              key={a.id}
+              to="/"
+              search={{ sid: a.senior_id ?? undefined, aid: a.id }}
+              className={
+                isDesktop
+                  ? "tap flex items-center gap-3 rounded-2xl border bg-card p-4 shadow-xs hover:border-primary/40 transition-colors"
+                  : "tap flex min-h-24 items-center gap-3 py-3"
+              }
+            >
+              <PersonAvatar id={a.senior_id} name={a.senior_name} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-lg font-bold">{personDisplayName(a.senior_name)}</span>
+                <span className="block text-sm text-muted-foreground">
+                  {a.neighborhood} · Espera {waitLabel(minutesWaiting(a.created_at))}
+                </span>
+              </span>
+            </Link>
+          ))}
+        </div>
+        {error && <p role="alert">No se pudieron cargar los avisos.</p>}
+        {!isLoading && !open.length && <p className="py-8 text-center text-muted-foreground">No hay avisos nuevos.</p>}
+      </div>
+    </Screen>
+  );
 }

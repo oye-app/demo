@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Building2, Smartphone, Sparkles } from "lucide-react";
 import { OyeLogo } from "@/components/oye";
 import { EnterprisePortal } from "@/components/enterprise/enterprise-portal";
+import { DeviceModeBadge } from "@/components/device-mode-badge";
 
 export const Route = createFileRoute("/empresas")({
   head: () => ({
@@ -49,6 +50,7 @@ function EmpresasRoute() {
           </nav>
 
           <div className="flex flex-wrap items-center gap-2">
+            <DeviceModeBadge compact />
             <Link
               to="/bienvenida"
               className="inline-flex items-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary"

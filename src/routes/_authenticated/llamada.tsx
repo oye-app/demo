@@ -26,6 +26,7 @@ import { AlertTimeline } from "@/components/alert-timeline";
 import { personDisplayName } from "@/lib/person-presentation";
 import { useAllCallLogs, useLatestCallLog, type CallLogRow } from "@/lib/call-logs";
 import { SituationReportCard } from "@/components/situation-report";
+import { useDeviceMode } from "@/lib/device-mode";
 
 export const Route = createFileRoute("/_authenticated/llamada")({
   validateSearch: personSearch,
@@ -59,6 +60,7 @@ const TALK_STEPS = [
 ];
 
 function Call() {
+  const { isDesktop } = useDeviceMode();
   const { user } = useMe();
   const { person, sid } = usePerson();
   const name = personDisplayName(person?.name ?? "");
@@ -197,20 +199,62 @@ function Call() {
 
   // Initial / Pick Screen
   if (mode === "idle" && !isRealActive) {
-    return (
-      <Screen
-        title="Llamada de OYE"
-        footer={
-          <div className="space-y-2">
-            <BigButton disabled={callingReal} onClick={handleStartRealCall}>
-              <Phone className="size-5" /> {callingReal ? "Iniciando..." : `Llamar a ${n} ahora (real)`}
-            </BigButton>
-            <BigButton tone="quiet" onClick={handleStartSimulation}>
-              Simulación rápida de demostración
-            </BigButton>
+    const callControls = (
+      <div className="space-y-2.5">
+        <BigButton disabled={callingReal} onClick={handleStartRealCall}>
+          <Phone className="size-5" /> {callingReal ? "Iniciando..." : `Llamar a ${n} ahora (real)`}
+        </BigButton>
+        <BigButton tone="quiet" onClick={handleStartSimulation}>
+          Simulación rápida de demostración
+        </BigButton>
+      </div>
+    );
+
+    if (isDesktop) {
+      return (
+        <Screen title="Llamada de OYE">
+          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] items-start pb-6">
+            <div className="space-y-4">
+              <div className="rounded-3xl border bg-card p-6 shadow-card space-y-4">
+                <div>
+                  <h2 className="text-2xl font-extrabold">Acompañamiento telefónico a {n}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    OYE realiza llamadas de voz natural, detecta urgencias intra-llamada y actualiza el informe geriátrico en tiempo real.
+                  </p>
+                </div>
+                {callControls}
+              </div>
+
+              {latestLog && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Último informe de llamada
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleManualRefresh}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline cursor-pointer"
+                    >
+                      <RefreshCw className={`size-3 ${refreshing ? "animate-spin" : ""}`} /> Actualizar
+                    </button>
+                  </div>
+                  <SituationReportCard log={latestLog} showExecutiveOnly={false} onRetryCall={handleStartRealCall} />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <Memory logs={allLogs} past={past} name={n} />
+              <AutoCall name={person?.name ?? ""} seniorId={sid ?? ""} userId={user.id} />
+            </div>
           </div>
-        }
-      >
+        </Screen>
+      );
+    }
+
+    return (
+      <Screen title="Llamada de OYE" footer={callControls}>
         <div className="space-y-4 pb-3">
           <div>
             <h1 className="mt-2 text-2xl font-extrabold">Acompañamiento a {n}</h1>

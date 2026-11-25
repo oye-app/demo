@@ -1,11 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Bell, Building2, ChevronRight, Heart, LogOut, Settings2, UserRound } from "lucide-react";
+import { Bell, Building2, Calculator, ChevronRight, Heart, LogOut, Settings2, UserRound } from "lucide-react";
 import { BigButton, Screen } from "@/components/oye";
 import { usePeople } from "@/lib/people";
 import { PERSONAS, useMe, type Persona } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
+import { useDeviceMode } from "@/lib/device-mode";
+import { DeviceModeBadge } from "@/components/device-mode-badge";
 
 export const Route = createFileRoute("/_authenticated/perfil")({
   head: () => ({
@@ -22,6 +24,7 @@ export const Route = createFileRoute("/_authenticated/perfil")({
 });
 
 function ProfilePage() {
+  const { isDesktop } = useDeviceMode();
   const { profile, user } = useMe();
   const {data:people=[]}=usePeople();
   const qc = useQueryClient();
@@ -45,8 +48,8 @@ function ProfilePage() {
     ...(profile.persona === "familia" ? [["Acompañamos a", `${people.length} personas`]] : []),
   ];
 
-  return (
-    <Screen title="Mi perfil">
+  const summaryBlock = (
+    <div className="space-y-4">
       <div className="flex items-center gap-4 pt-2">
         <span className="grid size-16 place-items-center rounded-full bg-primary text-primary-foreground"><UserRound className="size-8" /></span>
         <div className="min-w-0">
@@ -54,7 +57,7 @@ function ProfilePage() {
           <p className="text-sm text-primary font-semibold">{PERSONAS[profile.persona as Persona].label}</p>
         </div>
       </div>
-      <dl className="mt-5 divide-y rounded-3xl bg-card px-4 shadow-card">
+      <dl className="divide-y rounded-3xl bg-card px-4 shadow-card">
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between gap-3 py-3.5">
             <dt className="text-muted-foreground">{k}</dt><dd className="truncate font-semibold">{v}</dd>
@@ -62,25 +65,54 @@ function ProfilePage() {
         ))}
       </dl>
       <PushToggle />
-      <nav className="mt-4 divide-y rounded-3xl bg-card shadow-card">
-        <Link to="/bienvenida" search={{ paso: "perfil" }} className="flex items-center gap-3 p-4 font-semibold">
+      <DeviceModeBadge />
+    </div>
+  );
+
+  const navBlock = (
+    <div className="space-y-4">
+      <nav className="divide-y rounded-3xl bg-card shadow-card">
+        <Link to="/bienvenida" search={{ paso: "perfil" }} className="flex items-center gap-3 p-4 font-semibold hover:bg-secondary/40 rounded-t-3xl">
           <UserRound className="size-5 text-primary" /><span className="flex-1">Cambiar mis datos o mi papel</span><ChevronRight className="size-5 text-muted-foreground" />
         </Link>
-        <Link to="/recomendar" className="flex items-center gap-3 p-4 font-semibold">
+        <Link to="/recomendar" className="flex items-center gap-3 p-4 font-semibold hover:bg-secondary/40">
           <Heart className="size-5 text-primary" /><span className="flex-1">Recomendar a un vecino mayor</span><ChevronRight className="size-5 text-muted-foreground" />
         </Link>
+        <Link to="/empresas" className="flex items-center gap-3 p-4 font-semibold hover:bg-secondary/40">
+          <Calculator className="size-5 text-primary" /><span className="flex-1">Portal Empresas, ROI y Sandbox B2B</span><ChevronRight className="size-5 text-muted-foreground" />
+        </Link>
         {(profile.persona === "ong" || isAdmin) && (
-          <Link to="/consola" className="flex items-center gap-3 p-4 font-semibold">
+          <Link to="/consola" className="flex items-center gap-3 p-4 font-semibold hover:bg-secondary/40">
             <Building2 className="size-5 text-primary" /><span className="flex-1">Consola Web de Coordinación</span><ChevronRight className="size-5 text-muted-foreground" />
           </Link>
         )}
         {isAdmin && (
-          <Link to="/admin" className="flex items-center gap-3 p-4 font-semibold">
+          <Link to="/admin" className="flex items-center gap-3 p-4 font-semibold hover:bg-secondary/40 rounded-b-3xl">
             <Settings2 className="size-5 text-primary" /><span className="flex-1">Administración</span><ChevronRight className="size-5 text-muted-foreground" />
           </Link>
         )}
       </nav>
-      <div className="mt-4"><BigButton tone="danger" onClick={signOut}><LogOut className="size-5" /> Cerrar sesión</BigButton></div>
+      <div><BigButton tone="danger" onClick={signOut}><LogOut className="size-5" /> Cerrar sesión</BigButton></div>
+    </div>
+  );
+
+  if (isDesktop) {
+    return (
+      <Screen title="Mi perfil">
+        <div className="grid gap-6 lg:grid-cols-2 items-start pb-6">
+          {summaryBlock}
+          {navBlock}
+        </div>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen title="Mi perfil">
+      <div className="space-y-4 pb-4">
+        {summaryBlock}
+        {navBlock}
+      </div>
     </Screen>
   );
 }

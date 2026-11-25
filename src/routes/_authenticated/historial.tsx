@@ -11,6 +11,7 @@ import { personDisplayName } from "@/lib/person-presentation";
 import { PersonAvatar } from "@/components/person-avatar";
 import { useAllCallLogs, type CallLogRow } from "@/lib/call-logs";
 import { SituationReportCard } from "@/components/situation-report";
+import { useDeviceMode } from "@/lib/device-mode";
 
 export const Route = createFileRoute("/_authenticated/historial")({
   validateSearch: personSearch,
@@ -51,18 +52,20 @@ function formatSec(sec?: number | null): string {
 }
 
 function HistoryPage() {
+  const { isDesktop } = useDeviceMode();
   const { profile, user } = useMe();
   const { data: alerts = [], isLoading: loadingAlerts, error: alertsError } = useAlerts();
   const { sid, person } = usePerson();
   const { data: callLogs = [], isLoading: loadingLogs } = useAllCallLogs(sid);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // Auto-open the most recent call log when first loaded
+  // Auto-open the most recent call log (or legacy item) when first loaded
   useEffect(() => {
-    if (openId === null && callLogs.length > 0 && callLogs[0]?.id) {
-      setOpenId(callLogs[0].id);
+    if (openId === null) {
+      if (callLogs[0]?.id) setOpenId(callLogs[0].id);
+      else if (alerts[0]?.id) setOpenId(alerts[0].id);
     }
-  }, [callLogs, openId]);
+  }, [callLogs, alerts, openId]);
 
   const title =
     profile.persona === "voluntario" ? "Mis visitas" : `Llamadas a ${personDisplayName(person?.name ?? "")}`;
@@ -73,6 +76,69 @@ function HistoryPage() {
 
   const hasLogs = callLogs.length > 0;
   const isLoading = loadingLogs || loadingAlerts;
+
+  if (isDesktop) {
+    const selectedCall = hasLogs ? (callLogs.find((c) => c.id === openId) ?? callLogs[0] ?? null) : null;
+    const selectedLegacy = !hasLogs ? (legacyList.find((a) => a.id === openId) ?? legacyList[0] ?? null) : null;
+
+    return (
+      <Screen title={title}>
+        {alertsError && !hasLogs && (
+          <p role="alert" className="py-10 text-center text-destructive">
+            No se pudo cargar el historial.
+          </p>
+        )}
+
+        {!isLoading && !hasLogs && !legacyList.length ? (
+          <p className="py-12 text-center text-muted-foreground">
+            {profile.persona === "voluntario" ? "Todavía no hay visitas." : "Todavía no hay llamadas registradas."}
+          </p>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-[380px_1fr] items-start pb-6">
+            <aside className="rounded-3xl border bg-card p-2 shadow-card space-y-1.5 max-h-[78vh] overflow-y-auto">
+              <p className="px-3 pt-2 pb-1 text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                {hasLogs ? `Registro de llamadas (${callLogs.length})` : `Historial (${legacyList.length})`}
+              </p>
+              {hasLogs
+                ? callLogs.map((log) => (
+                    <CallLogRowCard
+                      key={log.id}
+                      log={log}
+                      personName={personDisplayName(person?.name ?? log.nombre ?? "Mayor")}
+                      open={selectedCall?.id === log.id}
+                      compactMaster
+                      onToggle={() => setOpenId(log.id)}
+                    />
+                  ))
+                : legacyList.map((a) => (
+                    <LegacyCallRow
+                      key={a.id}
+                      visit={profile.persona === "voluntario"}
+                      a={a}
+                      open={selectedLegacy?.id === a.id}
+                      compactMaster
+                      onToggle={() => setOpenId(a.id)}
+                    />
+                  ))}
+            </aside>
+
+            <section className="min-w-0">
+              {selectedCall ? (
+                <SituationReportCard log={selectedCall} showExecutiveOnly={false} />
+              ) : selectedLegacy ? (
+                <LegacyCallRow
+                  visit={profile.persona === "voluntario"}
+                  a={selectedLegacy}
+                  open
+                  onToggle={() => {}}
+                />
+              ) : null}
+            </section>
+          </div>
+        )}
+      </Screen>
+    );
+  }
 
   return (
     <Screen title={title}>
@@ -118,11 +184,13 @@ function CallLogRowCard({
   log,
   personName,
   open,
+  compactMaster = false,
   onToggle,
 }: {
   log: CallLogRow;
   personName: string;
   open: boolean;
+  compactMaster?: boolean;
   onToggle: () => void;
 }) {
   const d = new Date(log.created_at);
@@ -145,12 +213,20 @@ function CallLogRowCard({
     (log.status === "completada" ? "Llamada completada con informe" : log.status.replace(/_/g, " "));
 
   return (
-    <article className="overflow-hidden rounded-3xl bg-card shadow-card">
+    <article
+      className={`overflow-hidden rounded-2xl transition-colors ${
+        compactMaster
+          ? open
+            ? "border border-primary/40 bg-primary/8"
+            : "border border-transparent hover:bg-secondary/50"
+          : "rounded-3xl bg-card shadow-card"
+      }`}
+    >
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="tap flex w-full items-center gap-3 p-4 text-left"
+        className="tap flex w-full items-center gap-3 p-3.5 text-left"
       >
         <PersonAvatar id={log.person_id} name={personName} small />
         <span className="min-w-0 flex-1">
@@ -180,7 +256,7 @@ function CallLogRowCard({
         <ChevronDown className={`size-5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
-      {open && (
+      {!compactMaster && open && (
         <div className="animate-rise space-y-3 border-t p-3 pt-3">
           <SituationReportCard log={log} />
         </div>
@@ -194,22 +270,32 @@ function LegacyCallRow({
   open,
   onToggle,
   visit = false,
+  compactMaster = false,
 }: {
   a: Alert;
   visit?: boolean;
   open: boolean;
+  compactMaster?: boolean;
   onToggle: () => void;
 }) {
   const m = MOOD[a.mood as keyof typeof MOOD] ?? MOOD.bien;
   const d = new Date(a.created_at);
   const day = d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
   return (
-    <article className="overflow-hidden rounded-3xl bg-card shadow-card">
+    <article
+      className={`overflow-hidden rounded-2xl transition-colors ${
+        compactMaster
+          ? open
+            ? "border border-primary/40 bg-primary/8"
+            : "border border-transparent hover:bg-secondary/50"
+          : "rounded-3xl bg-card shadow-card"
+      }`}
+    >
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="tap flex w-full items-center gap-3 p-4 text-left"
+        className="tap flex w-full items-center gap-3 p-3.5 text-left"
       >
         <PersonAvatar id={a.senior_id} name={a.senior_name} small />
         <span className="min-w-0 flex-1">
@@ -229,7 +315,7 @@ function LegacyCallRow({
         </span>
         <ChevronDown className={`size-5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-      {open && (
+      {!compactMaster && open && (
         <div className="animate-rise space-y-3 border-t px-4 pt-3 pb-4">
           <div className="flex flex-wrap gap-1.5">
             <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-bold text-secondary-foreground">

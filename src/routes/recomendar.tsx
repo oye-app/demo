@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Check, Copy, MessageCircle } from "lucide-react";
 import { BigButton, Screen, btn } from "@/components/oye";
 import { supabase } from "@/integrations/supabase/client";
+import { useDeviceMode } from "@/lib/device-mode";
 
 const searchSchema = z.object({
   tipo: z.enum(["mayor", "voluntario"]).optional(),
@@ -53,6 +54,7 @@ const field =
   "h-12 w-full rounded-xl border bg-card px-4 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
 
 function Recommend() {
+  const { isDesktop } = useDeviceMode();
   const { tipo = "mayor", ref = "" } = Route.useSearch();
   const navigate = useNavigate({ from: "/recomendar" });
   const [done, setDone] = useState(false);
@@ -90,18 +92,8 @@ function Recommend() {
 
   if (done) return <Thanks tipo={tipo} name={v.person_name.split(" ")[0] ?? ""} />;
 
-  return (
-    <Screen
-      title={tipo === "mayor" ? "Recomendar" : "Ser voluntario"}
-      footer={
-        <div className="space-y-2">
-          {error && <p role="alert" className="text-center text-sm font-semibold text-destructive">{error}</p>}
-          <BigButton onClick={() => (document.getElementById("rec-form") as HTMLFormElement)?.requestSubmit()} disabled={busy}>
-            {busy ? "Enviando…" : "Enviar"}
-          </BigButton>
-        </div>
-      }
-    >
+  const formTabsAndFields = (
+    <div className={isDesktop ? "rounded-3xl border bg-card p-6 shadow-card space-y-4" : "flex min-h-0 flex-1 flex-col"}>
       <div role="tablist" className="grid grid-cols-2 gap-1 rounded-2xl bg-secondary p-1">
         {(["mayor", "voluntario"] as const).map((t) => (
           <button
@@ -116,7 +108,7 @@ function Recommend() {
         ))}
       </div>
 
-      <form id="rec-form" onSubmit={submit} className="mt-4 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
+      <form id="rec-form" onSubmit={submit} className={isDesktop ? "flex flex-col gap-3" : "mt-4 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto"}>
         {tipo === "mayor" ? (
           <>
             <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="¿Quién es?">
@@ -151,7 +143,58 @@ function Recommend() {
             : "Acepto que la ONG me contacte. Mis datos solo se usan para OYE."}
         </label>
         {ref && <p className="text-center text-xs text-muted-foreground">Le ha invitado un vecino · código {ref}</p>}
+        {isDesktop && (
+          <div className="space-y-2 pt-2">
+            {error && <p role="alert" className="text-center text-sm font-semibold text-destructive">{error}</p>}
+            <BigButton type="submit" disabled={busy}>{busy ? "Enviando…" : "Enviar"}</BigButton>
+          </div>
+        )}
       </form>
+    </div>
+  );
+
+  if (isDesktop) {
+    return (
+      <Screen title={tipo === "mayor" ? "Recomendar a un vecino" : "Ser voluntario"}>
+        <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] items-start pb-6">
+          <section className="rounded-3xl border bg-card p-6 shadow-xs space-y-4">
+            <span className="inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-extrabold text-primary">
+              Anillo Comunitario OYE
+            </span>
+            <h2 className="text-2xl font-black leading-tight text-foreground">
+              {tipo === "mayor"
+                ? "Recomienda a alguien que vive solo en menos de un minuto"
+                : "Únete como vecino voluntario cuando tu barrio te necesite"}
+            </h2>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {tipo === "mayor"
+                ? "La IA de OYE llama cada día sin necesidad de instalar apps ni hardware. En menos de 48 horas la coordinación local contacta para activar el acompañamiento gratuito."
+                : "La IA filtra automáticamente los días estables y solo avisa a los voluntarios cercanos cuando alguien necesita conversación o apoyo presencial."}
+            </p>
+            <ul className="space-y-2 border-t pt-4 text-xs text-muted-foreground">
+              <li>• Funciona con cualquier teléfono fijo o móvil convencional.</li>
+              <li>• Cada alta pasa revisión de coordinación ONG y verificación de consentimiento.</li>
+            </ul>
+          </section>
+          {formTabsAndFields}
+        </div>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen
+      title={tipo === "mayor" ? "Recomendar" : "Ser voluntario"}
+      footer={
+        <div className="space-y-2">
+          {error && <p role="alert" className="text-center text-sm font-semibold text-destructive">{error}</p>}
+          <BigButton onClick={() => (document.getElementById("rec-form") as HTMLFormElement)?.requestSubmit()} disabled={busy}>
+            {busy ? "Enviando…" : "Enviar"}
+          </BigButton>
+        </div>
+      }
+    >
+      {formTabsAndFields}
     </Screen>
   );
 }

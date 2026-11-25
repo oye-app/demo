@@ -57,6 +57,8 @@ import { demoAccess } from "@/lib/demo.functions";
 import { useAllCallLogs } from "@/lib/call-logs";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
+import { useDeviceMode } from "@/lib/device-mode";
+import { DeviceModeBadge } from "@/components/device-mode-badge";
 import {
   buildConsoleCsvExport,
   classifyUrgencyTier,
@@ -205,6 +207,7 @@ function ConsoleSignInScreen({
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <DeviceModeBadge compact />
             <Link
               to="/empresas"
               className="inline-flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/8 px-3 py-2 text-xs font-extrabold text-primary hover:bg-primary/15"
@@ -401,6 +404,7 @@ function ConsoleWorkspace({
   onDemoOng: () => void;
 }) {
   const qc = useQueryClient();
+  const { isMobile } = useDeviceMode();
   const { data: isOperator, isPending: checkingAccess } = useIsConsoleOperator();
   const { data: census = [], isPending: loadingCensus } = useConsoleCensus(!!isOperator);
   const { data: volunteers = [] } = useConsoleVolunteers(!!isOperator);
@@ -574,6 +578,7 @@ function ConsoleWorkspace({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <DeviceModeBadge compact />
             <button
               type="button"
               onClick={() => setImportOpen(true)}
@@ -619,6 +624,16 @@ function ConsoleWorkspace({
       </header>
 
       <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-4 py-5 lg:flex-row md:px-6">
+        {isMobile && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900 lg:hidden">
+            <span>
+              <strong>Móvil detectado automáticamente:</strong> para gestionar tablas completas te recomendamos escritorio o la app simplificada.
+            </span>
+            <Link to="/" className="font-extrabold text-primary underline">
+              Abrir App Móvil →
+            </Link>
+          </div>
+        )}
         {/* Left Navigation Sidebar */}
         <aside className="shrink-0 space-y-4 print:hidden lg:w-60">
           <nav aria-label="Secciones de la consola" className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-1">

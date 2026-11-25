@@ -13,6 +13,7 @@ import { useAllCallLogs } from "@/lib/call-logs";
 import { supabase } from "@/integrations/supabase/client";
 import { personDisplayName } from "@/lib/person-presentation";
 import { FamilyWeeklyDigest } from "@/components/family-weekly-digest";
+import { useDeviceMode } from "@/lib/device-mode";
 
 export const Route = createFileRoute("/_authenticated/persona")({
   validateSearch: personSearch,
@@ -34,9 +35,39 @@ export const Route = createFileRoute("/_authenticated/persona")({
 });
 
 function PersonPage() {
+  const { isDesktop } = useDeviceMode();
   const { person, sid } = usePerson();
   const [tab, setTab] = useState<"agenda" | "soledad">("agenda");
   const name = person?.name ?? "";
+
+  if (isDesktop) {
+    return (
+      <Screen title="Ficha de la persona">
+        <div className="space-y-6 pb-6">
+          {name ? <WellbeingCard senior={personDisplayName(name)} seniorId={sid} /> : null}
+          {!name ? (
+            <p className="pt-10 text-center text-muted-foreground">Aún no hay personas. Haga una primera llamada.</p>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-2 items-start">
+              <div className="space-y-2">
+                <h2 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                  Agenda, medicación y contacto con llave
+                </h2>
+                <Agenda key={`agenda-${sid}`} name={name} seniorId={sid ?? ""} />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                  Evolución de soledad UCLA-3 y resumen semanal
+                </h2>
+                <Loneliness key={`loneliness-${sid}`} name={personDisplayName(name)} seniorId={sid} />
+              </div>
+            </div>
+          )}
+        </div>
+      </Screen>
+    );
+  }
+
   return (
     <Screen title="Ficha de la persona">
       <Segmented

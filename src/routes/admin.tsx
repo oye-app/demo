@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { BarChart3, HandHeart, Inbox, LogOut, Plus, Settings, Trash2, Users } from "lucide-react";
+import { BarChart3, Building2, Calculator, HandHeart, Inbox, LogOut, Plus, Settings, Smartphone, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { activityStats } from "@/lib/stats";
@@ -10,6 +10,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import "@lovable.dev/cloud-auth-js/styles.css";
 import { BigButton, OyeLogo, btn } from "@/components/oye";
+import { useDeviceMode } from "@/lib/device-mode";
+import { DeviceModeBadge } from "@/components/device-mode-badge";
 
 export const Route = createFileRoute("/admin")({
   ssr: false,
@@ -31,6 +33,7 @@ const input =
   "h-12 w-full rounded-xl border bg-card px-4 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
 
 function Admin() {
+  const { isDesktop } = useDeviceMode();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
@@ -50,20 +53,52 @@ function Admin() {
   }, [session]);
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-2xl flex-col px-5 py-4">
+    <div className={`mx-auto flex min-h-dvh flex-col px-5 py-4 ${isDesktop ? "max-w-6xl" : "max-w-2xl"}`}>
       <Toaster position="top-center" />
-      <header className="flex h-12 items-center justify-between">
-        <Link to="/" className="text-primary"><OyeLogo /></Link>
-        {session && (
-          <button
-            onClick={() => supabase.auth.signOut()}
-            className="tap flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-muted-foreground hover:bg-secondary"
-          >
-            <LogOut className="size-4" /> Salir
-          </button>
-        )}
+      <header className="flex flex-wrap min-h-12 items-center justify-between gap-3 border-b pb-3">
+        <div className="flex items-center gap-3">
+          <Link to="/" className="text-primary"><OyeLogo /></Link>
+          {isDesktop && (
+            <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px] font-extrabold text-primary">
+              Administración del Sistema
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {isDesktop && (
+            <>
+              <Link
+                to="/consola"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-primary/10 px-3 py-1.5 text-xs font-extrabold text-primary hover:bg-primary/15"
+              >
+                <Building2 className="size-3.5" /> Consola ONG
+              </Link>
+              <Link
+                to="/empresas"
+                className="inline-flex items-center gap-1.5 rounded-xl border bg-card px-3 py-1.5 text-xs font-bold hover:bg-secondary"
+              >
+                <Calculator className="size-3.5 text-primary" /> Portal Empresas
+              </Link>
+              <Link
+                to="/"
+                className="inline-flex items-center gap-1.5 rounded-xl border bg-card px-3 py-1.5 text-xs font-bold hover:bg-secondary"
+              >
+                <Smartphone className="size-3.5" /> Inicio OYE
+              </Link>
+            </>
+          )}
+          <DeviceModeBadge compact />
+          {session && (
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="tap flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-muted-foreground hover:bg-secondary"
+            >
+              <LogOut className="size-4" /> Salir
+            </button>
+          )}
+        </div>
       </header>
-      <main className="flex flex-1 flex-col">
+      <main className="flex flex-1 flex-col pt-3">
         {session === undefined ? null : !session ? (
           <SignIn />
         ) : isAdmin === null ? null : !isAdmin ? (
@@ -133,6 +168,7 @@ function SignIn() {
 type Tab = "resumen" | "recomendaciones" | "personas" | "voluntarios" | "organizacion";
 
 function Editor() {
+  const { isDesktop } = useDeviceMode();
   const [tab, setTab] = useState<Tab>("resumen");
   const [pending, setPending] = useState(0);
   const refreshPending = () =>
@@ -154,9 +190,9 @@ function Editor() {
             role="tab"
             aria-selected={tab === k}
             onClick={() => setTab(k)}
-            className={`relative flex h-14 flex-col items-center justify-center gap-0.5 rounded-xl text-[0.7rem] font-bold transition ${tab === k ? "bg-card text-primary shadow-card" : "text-secondary-foreground"}`}
+            className={`relative flex ${isDesktop ? "h-11 flex-row gap-2 text-xs" : "h-14 flex-col gap-0.5 text-[0.7rem]"} items-center justify-center rounded-xl font-bold transition ${tab === k ? "bg-card text-primary shadow-card" : "text-secondary-foreground"}`}
           >
-            <Icon className="size-5" />
+            <Icon className={isDesktop ? "size-4" : "size-5"} />
             {l}
             {k === "recomendaciones" && pending > 0 && (
               <span className="absolute top-1 right-1.5 grid min-w-5 place-items-center rounded-full bg-destructive px-1 text-[0.65rem] text-destructive-foreground">{pending}</span>
@@ -167,9 +203,19 @@ function Editor() {
       <div className="mt-5 flex-1 pb-6">
         {tab === "resumen" && <Summary go={setTab} />}
         {tab === "recomendaciones" && <Referrals onChange={refreshPending} />}
-        {tab === "personas" && <><LinkRequests /><ListEditor kind="seniors" /></>}
+        {tab === "personas" && (
+          <div className={isDesktop ? "grid gap-6 lg:grid-cols-[0.85fr_1.15fr] items-start" : ""}>
+            <LinkRequests />
+            <ListEditor kind="seniors" />
+          </div>
+        )}
         {tab === "voluntarios" && <ListEditor kind="volunteers" />}
-        {tab === "organizacion" && <><CoordinatorAccess /><OrgEditor /></>}
+        {tab === "organizacion" && (
+          <div className={isDesktop ? "grid gap-6 lg:grid-cols-2 items-start" : ""}>
+            <CoordinatorAccess />
+            <OrgEditor />
+          </div>
+        )}
       </div>
     </>
   );

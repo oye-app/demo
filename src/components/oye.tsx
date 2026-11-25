@@ -1,10 +1,23 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { AlertNotifier } from "@/components/alert-notifier";
-import { Bell, ChevronLeft, Heart, History, Home, Phone, UserRound } from "lucide-react";
+import {
+  Bell,
+  Building2,
+  Calculator,
+  ChevronLeft,
+  Heart,
+  History,
+  Home,
+  LogIn,
+  Phone,
+  UserRound,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { meQuery } from "@/lib/auth";
+import { meQuery, PERSONAS, type Persona } from "@/lib/auth";
 import { usePersonId, peopleQuery } from "@/lib/people";
 import { personSection } from "@/lib/person-navigation";
+import { useDeviceMode } from "@/lib/device-mode";
+import { DeviceModeBadge } from "@/components/device-mode-badge";
 import type { ReactNode } from "react";
 import { PersonAvatar } from "./person-avatar";
 import { personDisplayName } from "@/lib/person-presentation";
@@ -40,10 +53,154 @@ export function OyeLogo({
 export function Screen({ title, children, footer }: { title?: string; children: ReactNode; footer?: ReactNode }) {
   const path = useLocation({ select: (l) => l.pathname });
   const sid = usePersonId();
-  const {data:me}=useQuery(meQuery);
-  const {data:people=[]}=useQuery({...peopleQuery(me?.user?.id??""),enabled:!!sid && !!me?.user});
+  const { data: me } = useQuery(meQuery);
+  const { data: people = [] } = useQuery({ ...peopleQuery(me?.user?.id ?? ""), enabled: !!sid && !!me?.user });
+  const { isDesktop } = useDeviceMode();
   const selected = people.find((p) => p.id === sid);
   const isTab = NAV.some((n) => n.to === path) || path === "/avisos";
+
+  const persona = me?.profile?.persona as keyof typeof HISTORY_LABEL | undefined;
+  const navItems = persona === "voluntario" ? VOLUNTEER_NAV : NAV;
+
+  if (isDesktop) {
+    const personaMeta = persona && persona in PERSONAS ? PERSONAS[persona as Persona] : null;
+    return (
+      <div className="flex min-h-dvh bg-secondary/35 text-foreground">
+        {persona && me?.profile && me.user && <AlertNotifier profile={me.profile} userId={me.user.id} />}
+
+        {/* Desktop Persistent Navigation Sidebar */}
+        <aside className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col justify-between border-r bg-card p-4">
+          <div className="space-y-5 overflow-y-auto pr-0.5">
+            <div className="space-y-1.5 px-1">
+              <Link to="/" className="inline-block text-primary">
+                <OyeLogo />
+              </Link>
+              {me?.profile && personaMeta ? (
+                <div className="rounded-xl bg-secondary/60 px-2.5 py-2 text-xs">
+                  <p className="truncate font-extrabold text-foreground">{me.profile.full_name || me.user?.email}</p>
+                  <p className="text-[11px] font-bold text-primary">{personaMeta.label}</p>
+                </div>
+              ) : (
+                <p className="text-xs font-semibold text-muted-foreground">Acompañamiento telefónico IA</p>
+              )}
+            </div>
+
+            {persona && me?.profile && me.user ? (
+              <nav aria-label="Principal escritorio" className="space-y-1">
+                {navItems.map(({ to, label, Icon }) => {
+                  const active = path === to;
+                  const resolvedLabel = to === "/historial" ? HISTORY_LABEL[persona] : label;
+                  return (
+                    <Link
+                      key={to}
+                      to={to}
+                      search={to === "/llamada" || to === "/historial" ? { sid } : {}}
+                      aria-current={active ? "page" : undefined}
+                      className={`flex items-center gap-2.5 rounded-2xl px-3.5 py-2.5 text-sm font-bold transition-colors ${
+                        active
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-foreground hover:bg-secondary/70"
+                      }`}
+                    >
+                      <Icon className="size-4.5 shrink-0" />
+                      <span>{resolvedLabel}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            ) : (
+              <nav aria-label="Navegación pública escritorio" className="space-y-1">
+                <Link
+                  to="/recomendar"
+                  aria-current={path === "/recomendar" ? "page" : undefined}
+                  className={`flex items-center gap-2.5 rounded-2xl px-3.5 py-2.5 text-sm font-bold ${
+                    path === "/recomendar" ? "bg-primary text-primary-foreground" : "hover:bg-secondary/70"
+                  }`}
+                >
+                  <Heart className="size-4.5 shrink-0" />
+                  <span>Recomendar vecino</span>
+                </Link>
+                <Link
+                  to="/bienvenida"
+                  className="flex items-center gap-2.5 rounded-2xl px-3.5 py-2.5 text-sm font-bold text-foreground hover:bg-secondary/70"
+                >
+                  <LogIn className="size-4.5 shrink-0 text-primary" />
+                  <span>Iniciar sesión / Registro</span>
+                </Link>
+              </nav>
+            )}
+
+            <div className="space-y-1.5 border-t pt-3">
+              <p className="px-2 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">
+                Entorno B2B & Coordinación
+              </p>
+              <Link
+                to="/empresas"
+                className="flex items-center gap-2.5 rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-extrabold text-primary hover:bg-primary/10"
+              >
+                <Calculator className="size-4 shrink-0" />
+                <span>Portal Empresas & ROI</span>
+              </Link>
+              <Link
+                to="/consola"
+                className="flex items-center gap-2.5 rounded-2xl border bg-background px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary"
+              >
+                <Building2 className="size-4 shrink-0 text-primary" />
+                <span>Consola Web ONG</span>
+              </Link>
+            </div>
+          </div>
+
+          <DeviceModeBadge />
+        </aside>
+
+        {/* Right Desktop Workspace */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-20 border-b bg-card/95 px-6 py-3 backdrop-blur">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                {title && !isTab && (
+                  <Link
+                    to="/"
+                    aria-label="Volver al inicio"
+                    className="tap grid size-9 shrink-0 place-items-center rounded-xl border bg-background text-primary hover:bg-secondary"
+                  >
+                    <ChevronLeft className="size-5" />
+                  </Link>
+                )}
+                <h1 className="truncate text-lg font-extrabold text-foreground">
+                  {title ?? "Centro de Acompañamiento OYE"}
+                </h1>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {selected && (
+                  <div className="flex items-center gap-2.5 rounded-2xl border bg-background px-3 py-1.5 shadow-xs">
+                    <PersonAvatar key={selected.id} id={selected.id} name={selected.name} small />
+                    <PersonEditor key={selected.id} id={selected.id} name={selected.name} />
+                    <Link
+                      to={personSection(path)}
+                      search={{ sid: undefined, aid: undefined }}
+                      className="rounded-lg bg-secondary px-2.5 py-1 text-xs font-bold text-primary hover:bg-secondary/80"
+                    >
+                      Cambiar
+                    </Link>
+                  </div>
+                )}
+                <DeviceModeBadge compact />
+              </div>
+            </div>
+          </header>
+
+          <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-6">
+            <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+            {footer && <div className="mt-6 max-w-xl border-t pt-5">{footer}</div>}
+          </main>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex h-dvh max-w-md flex-col">
       <div className="flex min-h-0 flex-1 flex-col px-5 pt-4 pb-3">

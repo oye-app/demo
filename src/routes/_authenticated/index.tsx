@@ -35,6 +35,7 @@ import { useAllCallLogs, useLatestCallLog } from "@/lib/call-logs";
 import { SituationReportCard } from "@/components/situation-report";
 import { B2BModeSelector } from "@/components/b2b-meeting-panel";
 import { FamilyWeeklyDigest } from "@/components/family-weekly-digest";
+import { useDeviceMode } from "@/lib/device-mode";
 
 export const Route = createFileRoute("/_authenticated/")({
   validateSearch: personSearch,
@@ -82,6 +83,7 @@ function PeopleSelector() {
   const { profile, user } = useMe();
   const navigate = useNavigate();
   const add = useServerFn(addPerson);
+  const { isDesktop } = useDeviceMode();
   const { data: membership, isPending: checkingDemo } = useQuery({
     queryKey: ["demo-membership", user.id],
     queryFn: async () => {
@@ -181,9 +183,22 @@ function PeopleSelector() {
 
   return (
     <>
-      <h1 className="mt-1 text-3xl font-extrabold">{volunteer ? "Personas" : "Mis personas"}</h1>
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-3xl font-extrabold">{volunteer ? "Personas" : "Mis personas"}</h1>
+        {isDesktop && !volunteer && !adding && (
+          <button
+            type="button"
+            disabled={checkingDemo}
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-extrabold text-primary-foreground shadow-xs hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+          >
+            <Plus className="size-4" />
+            Añadir persona
+          </button>
+        )}
+      </div>
       {volunteer && (
-        <div className="mt-3">
+        <div className="mt-3 max-w-lg">
           <Segmented
             value={tab}
             onChange={setTab}
@@ -205,7 +220,7 @@ function PeopleSelector() {
             No se pudieron cargar las personas.
           </p>
         )}
-        <ul className="divide-y">
+        <ul className={isDesktop ? "grid gap-3 md:grid-cols-2" : "divide-y"}>
           {list.map((item) => {
             const isAlert = "senior_id" in item;
             const id = isAlert ? item.senior_id : item.id;
@@ -250,7 +265,13 @@ function PeopleSelector() {
                   to="/"
                   search={{ sid: id, aid: isAlert ? item.id : undefined }}
                   onClick={() => sessionStorage.setItem(`oye-person-${user.id}`, id)}
-                  className={`tap flex min-h-24 items-center gap-3 py-4 ${lastId === id ? "bg-secondary/30" : ""}`}
+                  className={
+                    isDesktop
+                      ? `tap flex h-full items-center gap-3 rounded-2xl border bg-card p-4 shadow-xs transition-colors hover:border-primary/40 ${
+                          lastId === id ? "ring-1 ring-primary/30" : ""
+                        }`
+                      : `tap flex min-h-24 items-center gap-3 py-4 ${lastId === id ? "bg-secondary/30" : ""}`
+                  }
                 >
                   <PersonAvatar id={id} name={label} />
                   <span className="min-w-0 flex-1">
@@ -348,7 +369,7 @@ function PeopleSelector() {
           </form>
         )}
       </div>
-      {!volunteer && !adding && (
+      {!isDesktop && !volunteer && !adding && (
         <BigButton tone="ghost" disabled={checkingDemo} onClick={() => setAdding(true)}>
           <Plus className="size-5" />
           Añadir persona
@@ -412,6 +433,7 @@ function CallCta({ label = "Llamar ahora" }: { label?: string }) {
 }
 
 function FamilyHome({ senior, relation }: { senior: string; relation: string }) {
+  const { isDesktop } = useDeviceMode();
   const { data = [] } = useAlerts();
   const { sid } = usePerson();
   const navigate = useNavigate();
@@ -505,24 +527,109 @@ function FamilyHome({ senior, relation }: { senior: string; relation: string }) 
 
   const isUrgent = latestLog?.status === "urgencia_en_curso";
 
+  const urgentBanner = isUrgent ? (
+    <section className="animate-pulse rounded-3xl border-2 border-destructive bg-destructive/15 p-4 shadow-card">
+      <div className="flex items-start gap-3">
+        <ShieldAlert className="mt-0.5 size-7 shrink-0 text-destructive" />
+        <div>
+          <h2 className="text-lg font-black text-destructive">🚨 Alerta crítica: Urgencia en curso</h2>
+          <p className="mt-1 text-xs font-semibold text-foreground">
+            Se ha alertado al contacto de confianza y activado el protocolo de cercanía. Contacte inmediatamente con{" "}
+            {senior}.
+          </p>
+        </div>
+      </div>
+    </section>
+  ) : null;
+
+  const reportBlock = latestLog ? (
+    <div className="space-y-2">
+      <SituationReportCard
+        log={latestLog}
+        showExecutiveOnly={isDesktop ? false : !showFullScales}
+        keyContact={
+          care
+            ? { name: care.key_contact_name, phone: care.key_contact_phone }
+            : undefined
+        }
+        onRetryCall={() => void navigate({ to: "/llamada", search: { sid } })}
+      />
+      {!isDesktop && latestLog.status === "completada" && (
+        <button
+          type="button"
+          onClick={() => setShowFullScales((v) => !v)}
+          className="tap flex w-full items-center justify-center gap-1.5 rounded-2xl bg-secondary/80 py-2.5 text-xs font-bold text-primary hover:bg-secondary"
+        >
+          <span>
+            {showFullScales
+              ? "Ocultar escalas geriátricas detalladas (UCLA-3, Yesavage, Autocuidado)"
+              : "Ver escalas geriátricas detalladas (UCLA-3, Yesavage, Autocuidado)"}
+          </span>
+          <ChevronDown className={`size-4 transition-transform ${showFullScales ? "rotate-180" : ""}`} />
+        </button>
+      )}
+    </div>
+  ) : (
+    <section aria-live="polite" className="rounded-3xl bg-card p-4 shadow-card">
+      <div className="flex items-center gap-3">
+        <span className={`size-4 shrink-0 rounded-full ${tone}`} />
+        <h2 className="text-xl font-extrabold leading-tight">{title}</h2>
+      </div>
+      {statusSubtitle && <p className="mt-1.5 text-sm text-foreground/90">{statusSubtitle}</p>}
+      {last && (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {new Date(last.created_at).toLocaleString("es-ES", {
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+      )}
+    </section>
+  );
+
+  const fichaCard = (
+    <Link to="/persona" search={{ sid }} className="tap flex items-center gap-3 rounded-2xl bg-card p-3.5 shadow-card">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10">
+        <ClipboardList className="size-5 text-primary" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-bold text-primary">
+          Ficha de {senior} {relation ? `(${relation})` : ""}
+        </span>
+        <span className="block text-xs text-muted-foreground">Contacto con llave, medicación, citas y evolución de soledad</span>
+      </span>
+      <ChevronRight className="size-5 shrink-0 text-muted-foreground" />
+    </Link>
+  );
+
+  if (isDesktop) {
+    return (
+      <div className="space-y-4 pb-6">
+        <h1 className="sr-only">Resumen de {senior}</h1>
+        {urgentBanner}
+        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] items-start">
+          <div className="space-y-4">
+            <CallCta label={`Llamar a ${senior} ahora`} />
+            <B2BModeSelector />
+            {reportBlock}
+          </div>
+          <div className="space-y-4">
+            <WellbeingCard senior={senior} seniorId={sid} />
+            <FamilyWeeklyDigest seniorName={senior} seniorId={sid} />
+            {fichaCard}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3 pb-3">
       <h1 className="sr-only">Resumen de {senior}</h1>
 
-      {isUrgent && (
-        <section className="animate-pulse rounded-3xl border-2 border-destructive bg-destructive/15 p-4 shadow-card">
-          <div className="flex items-start gap-3">
-            <ShieldAlert className="mt-0.5 size-7 shrink-0 text-destructive" />
-            <div>
-              <h2 className="text-lg font-black text-destructive">🚨 Alerta crítica: Urgencia en curso</h2>
-              <p className="mt-1 text-xs font-semibold text-foreground">
-                Se ha alertado al contacto de confianza y activado el protocolo de cercanía. Contacte inmediatamente con{" "}
-                {senior}.
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
+      {urgentBanner}
 
       {/* Primary CTA at top for immediate access */}
       <CallCta label={`Llamar a ${senior} ahora`} />
@@ -530,70 +637,13 @@ function FamilyHome({ senior, relation }: { senior: string; relation: string }) 
       {/* Discreet B2B Meeting View Switcher (off by default for clean family UX) */}
       <B2BModeSelector />
 
-      {/* Render full SituationReportCard when a call log is available */}
-      {latestLog ? (
-        <div className="space-y-2">
-          <SituationReportCard
-            log={latestLog}
-            showExecutiveOnly={!showFullScales}
-            keyContact={
-              care
-                ? { name: care.key_contact_name, phone: care.key_contact_phone }
-                : undefined
-            }
-            onRetryCall={() => void navigate({ to: "/llamada", search: { sid } })}
-          />
-          {latestLog.status === "completada" && (
-            <button
-              type="button"
-              onClick={() => setShowFullScales((v) => !v)}
-              className="tap flex w-full items-center justify-center gap-1.5 rounded-2xl bg-secondary/80 py-2.5 text-xs font-bold text-primary hover:bg-secondary"
-            >
-              <span>
-                {showFullScales
-                  ? "Ocultar escalas geriátricas detalladas (UCLA-3, Yesavage, Autocuidado)"
-                  : "Ver escalas geriátricas detalladas (UCLA-3, Yesavage, Autocuidado)"}
-              </span>
-              <ChevronDown className={`size-4 transition-transform ${showFullScales ? "rotate-180" : ""}`} />
-            </button>
-          )}
-        </div>
-      ) : (
-        <section aria-live="polite" className="rounded-3xl bg-card p-4 shadow-card">
-          <div className="flex items-center gap-3">
-            <span className={`size-4 shrink-0 rounded-full ${tone}`} />
-            <h2 className="text-xl font-extrabold leading-tight">{title}</h2>
-          </div>
-          {statusSubtitle && <p className="mt-1.5 text-sm text-foreground/90">{statusSubtitle}</p>}
-          {last && (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {new Date(last.created_at).toLocaleString("es-ES", {
-                day: "numeric",
-                month: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </p>
-          )}
-        </section>
-      )}
+      {reportBlock}
 
       <WellbeingCard senior={senior} seniorId={sid} compact />
 
       <FamilyWeeklyDigest seniorName={senior} seniorId={sid} compact />
 
-      <Link to="/persona" search={{ sid }} className="tap flex items-center gap-3 rounded-2xl bg-card p-3.5 shadow-card">
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10">
-          <ClipboardList className="size-5 text-primary" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-bold text-primary">
-            Ficha de {senior} {relation ? `(${relation})` : ""}
-          </span>
-          <span className="block text-xs text-muted-foreground">Contacto con llave, medicación, citas y evolución de soledad</span>
-        </span>
-        <ChevronRight className="size-5 shrink-0 text-muted-foreground" />
-      </Link>
+      {fichaCard}
     </div>
   );
 }
@@ -602,6 +652,7 @@ const waited = (a: Alert) => Math.round((Date.now() - new Date(a.created_at).get
 const URGENT_MIN = 30;
 
 function NgoHome() {
+  const { isDesktop } = useDeviceMode();
   const [choosing, setChoosing] = useState(false);
   const { data: people = [] } = usePeople();
   const { data = [] } = useAlerts(true);
@@ -657,6 +708,26 @@ function NgoHome() {
         <B2BModeSelector />
       </div>
 
+      {isDesktop && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/25 bg-primary/6 px-4 py-3">
+          <div>
+            <p className="text-xs font-extrabold text-primary">
+              Entorno de escritorio detectado automáticamente
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Para trabajar con cola SLA, radar predictivo, biomarcadores, FHIR R4 y despacho vecinal completo abre la Consola 360°.
+            </p>
+          </div>
+          <Link
+            to="/consola"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-extrabold text-primary-foreground shadow-xs hover:bg-primary/90"
+          >
+            <Building2 className="size-4" />
+            Abrir Consola 360°
+          </Link>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2 pt-2">
         <div className="rounded-2xl border bg-card p-3 text-center">
           <span className="block text-2xl font-black text-foreground">{people.length}</span>
@@ -691,7 +762,7 @@ function NgoHome() {
       <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pb-2">
         {tab === "seniors" ? (
           <div className="space-y-2">
-            <ul className="divide-y rounded-2xl border bg-card p-2 shadow-sm">
+            <ul className={isDesktop ? "grid gap-2.5 md:grid-cols-2" : "divide-y rounded-2xl border bg-card p-2 shadow-sm"}>
               {people.map((p) => {
                 const latestCall = allCallLogs.find((c) => c.person_id === p.id);
                 const seniorAlert = open.find((a) => a.senior_id === p.id);
@@ -719,7 +790,7 @@ function NgoHome() {
                 }
 
                 return (
-                  <li key={p.id} className="flex items-center justify-between gap-3 p-3">
+                  <li key={p.id} className={isDesktop ? "flex items-center justify-between gap-3 rounded-2xl border bg-card p-3.5 shadow-xs" : "flex items-center justify-between gap-3 p-3"}>
                     <div className="flex min-w-0 items-center gap-3">
                       <PersonAvatar id={p.id} name={p.name} small />
                       <div className="min-w-0">
@@ -744,33 +815,35 @@ function NgoHome() {
             </ul>
           </div>
         ) : (
-          list.map((a) => (
-            <div key={a.id}>
-              {a.status === "open" && (
-                <p
-                  className={`mb-1 px-2 text-xs font-bold ${
-                    waited(a) >= URGENT_MIN || a.mood === "no_contesta" ? "text-destructive" : "text-muted-foreground"
-                  }`}
+          <div className={isDesktop ? "grid gap-4 md:grid-cols-2 items-start" : "space-y-3"}>
+            {list.map((a) => (
+              <div key={a.id}>
+                {a.status === "open" && (
+                  <p
+                    className={`mb-1 px-2 text-xs font-bold ${
+                      waited(a) >= URGENT_MIN || a.mood === "no_contesta" ? "text-destructive" : "text-muted-foreground"
+                    }`}
+                  >
+                    Esperando {waited(a) < 60 ? `${waited(a)} min` : `${Math.round(waited(a) / 60)} h`}
+                    {a.mood === "no_contesta" ? " · No contesta: la ONG debe ir" : ""}
+                  </p>
+                )}
+                <Link
+                  to="/"
+                  search={{ sid: a.senior_id ?? undefined }}
+                  className="tap mb-2 inline-flex min-h-11 items-center gap-1 text-sm font-bold text-primary"
                 >
-                  Esperando {waited(a) < 60 ? `${waited(a)} min` : `${Math.round(waited(a) / 60)} h`}
-                  {a.mood === "no_contesta" ? " · No contesta: la ONG debe ir" : ""}
-                </p>
-              )}
-              <Link
-                to="/"
-                search={{ sid: a.senior_id ?? undefined }}
-                className="tap mb-2 inline-flex min-h-11 items-center gap-1 text-sm font-bold text-primary"
-              >
-                Ver persona
-                <ChevronRight className="size-4" />
-              </Link>
-              <AlertCard
-                a={a}
-                showTranscript={true}
-                actions={<VisitActions a={a} userId={user.id} busyElsewhere={!!active} />}
-              />
-            </div>
-          ))
+                  Ver persona
+                  <ChevronRight className="size-4" />
+                </Link>
+                <AlertCard
+                  a={a}
+                  showTranscript={true}
+                  actions={<VisitActions a={a} userId={user.id} busyElsewhere={!!active} />}
+                />
+              </div>
+            ))}
+          </div>
         )}
 
         {tab !== "seniors" && !list.length && (

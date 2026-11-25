@@ -2,13 +2,15 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { z } from "zod";
-import { Building2, HandHeart, Users } from "lucide-react";
+import { Building2, Calculator, HandHeart, Heart, Sparkles, Users } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { BigButton, OyeLogo, btn } from "@/components/oye";
 import { useServerFn } from "@tanstack/react-start";
 import { demoAccess } from "@/lib/demo.functions";
 import { meQuery, PERSONAS, type Persona } from "@/lib/auth";
+import { useDeviceMode } from "@/lib/device-mode";
+import { DeviceModeBadge } from "@/components/device-mode-badge";
 import img1 from "@/assets/onb-1.jpg";
 import img2 from "@/assets/onb-2.jpg";
 import img3 from "@/assets/onb-3.jpg";
@@ -45,6 +47,7 @@ function Welcome() {
   const navigate = useNavigate({ from: "/bienvenida" });
   const go = (p: "intro" | "acceso" | "perfil") => navigate({ search: { paso: p }, replace: true });
   const qc = useQueryClient();
+  const { isDesktop } = useDeviceMode();
 
   // Route the visitor to the right step from their session state.
   useEffect(() => {
@@ -59,6 +62,121 @@ function Welcome() {
     });
     return () => data.subscription.unsubscribe();
   }, [paso]);
+
+  if (isDesktop) {
+    return (
+      <div className="flex min-h-dvh flex-col bg-secondary/35 text-foreground">
+        <header className="sticky top-0 z-20 border-b bg-card/95 px-6 py-3 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+            <OyeLogo className="text-primary" />
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                to="/recomendar"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border bg-background px-3 text-xs font-bold hover:bg-secondary"
+              >
+                <Heart className="size-3.5 text-primary" />
+                Recomendar vecino
+              </Link>
+              <Link
+                to="/empresas"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/8 px-3 text-xs font-extrabold text-primary hover:bg-primary/15"
+              >
+                <Calculator className="size-3.5" />
+                Portal Empresas & ROI
+              </Link>
+              <Link
+                to="/consola"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3.5 text-xs font-extrabold text-primary-foreground shadow-xs hover:bg-primary/90"
+              >
+                <Building2 className="size-3.5" />
+                Consola ONG
+              </Link>
+              <DeviceModeBadge compact />
+            </div>
+          </div>
+        </header>
+
+        <div className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-10 px-6 py-8 lg:grid-cols-[1.15fr_460px]">
+          <section className="space-y-6">
+            <div className="space-y-3">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-extrabold text-primary">
+                <Sparkles className="size-3.5" />
+                Acompañamiento diario por voz telefónica · Sin hardware en casa
+              </span>
+              <h1 className="text-4xl font-black tracking-tight text-foreground leading-[1.12]">
+                La IA llama cada día a quienes viven solos. El humano acude cuando hace falta.
+              </h1>
+              <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
+                Entra en 1 clic como familia, voluntario o coordinación ONG, o explora directamente la arquitectura técnica y simulador de cohorte en el entorno Enterprise.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              {SLIDES.map((s, idx) => (
+                <article key={s.title} className="overflow-hidden rounded-2xl border bg-card shadow-xs">
+                  <div className="aspect-[4/3] overflow-hidden bg-secondary">
+                    <img
+                      src={s.img}
+                      alt={s.alt}
+                      style={{ objectPosition: s.pos }}
+                      className="size-full object-cover"
+                    />
+                  </div>
+                  <div className="p-3 space-y-1">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-primary">
+                      Paso {idx + 1}
+                    </span>
+                    <h2 className="text-xs font-extrabold text-foreground leading-snug">{s.title}</h2>
+                    <p className="text-[11px] text-muted-foreground leading-snug">{s.text}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Link
+                to="/empresas"
+                className="group rounded-2xl border border-primary/25 bg-card p-4 shadow-xs hover:border-primary transition-colors space-y-1"
+              >
+                <p className="flex items-center gap-1.5 text-xs font-extrabold text-primary">
+                  <Calculator className="size-4" /> Portal Empresas & Aseguradoras →
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Simula ROI (100–50.000 mayores), prueba GPT-4o en vivo e inspecciona HL7 FHIR R4.
+                </p>
+              </Link>
+              <Link
+                to="/consola"
+                className="group rounded-2xl border bg-card p-4 shadow-xs hover:border-primary transition-colors space-y-1"
+              >
+                <p className="flex items-center gap-1.5 text-xs font-extrabold text-foreground group-hover:text-primary">
+                  <Building2 className="size-4 text-primary" /> Centro de Mando Consola ONG →
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Cola SLA 30/60 min, radar predictivo, biomarcadores vocales y despacho vecinal.
+                </p>
+              </Link>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border bg-card p-6 shadow-xl">
+            {paso === "perfil" ? (
+              <div className="flex min-h-[460px] flex-col">
+                <ProfileForm
+                  onDone={async () => {
+                    await qc.invalidateQueries({ queryKey: ["me"] });
+                    navigate({ to: "/" });
+                  }}
+                />
+              </div>
+            ) : (
+              <Access />
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex h-dvh max-w-md flex-col px-5 pt-4 pb-6">
