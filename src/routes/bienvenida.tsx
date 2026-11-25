@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { z } from "zod";
@@ -62,9 +62,24 @@ function Welcome() {
 
   return (
     <div className="mx-auto flex h-dvh max-w-md flex-col px-5 pt-4 pb-6">
-      <header className="flex h-12 shrink-0 items-center justify-between">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2">
         <OyeLogo className="text-primary" />
-        {paso === "intro" && <button onClick={() => go("acceso")} className="tap h-11 rounded-2xl px-4 text-base font-bold text-muted-foreground hover:bg-muted">Saltar</button>}
+        <div className="flex items-center gap-1.5">
+          <Link
+            to="/empresas"
+            className="inline-flex h-9 items-center gap-1 rounded-xl border border-primary/25 bg-primary/8 px-2.5 text-xs font-extrabold text-primary hover:bg-primary/15"
+          >
+            <Building2 className="size-3.5" />
+            Empresas
+          </Link>
+          <Link
+            to="/consola"
+            className="hidden h-9 items-center rounded-xl border bg-card px-2.5 text-xs font-bold text-foreground hover:bg-secondary sm:inline-flex"
+          >
+            Consola ONG
+          </Link>
+          {paso === "intro" && <button onClick={() => go("acceso")} className="tap h-11 rounded-2xl px-3 text-base font-bold text-muted-foreground hover:bg-muted">Saltar</button>}
+        </div>
       </header>
       {paso === "intro" && <Intro onDone={() => go("acceso")} />}
       {paso === "acceso" && <Access />}
@@ -145,15 +160,27 @@ function Access() {
     <main className="flex flex-1 flex-col justify-center">
       <h1 className="text-3xl font-extrabold">{mode === "up" ? "Cree su cuenta" : "Bienvenido de nuevo"}</h1>
       <p className="mt-1 text-muted-foreground">Tarda menos de un minuto.</p>
-      <div className="mt-5 rounded-2xl bg-secondary p-3">
-        <p className="text-sm font-bold text-secondary-foreground">Probar ya, sin registro</p>
-        <div className="mt-2 grid grid-cols-3 gap-2">
+      <div className="mt-5 rounded-2xl bg-secondary p-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-bold text-secondary-foreground">Probar ya, sin registro</p>
+          <Link to="/empresas" className="text-xs font-extrabold text-primary hover:underline">
+            Portal Empresas B2B →
+          </Link>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
           {(Object.keys(PERSONAS) as Persona[]).map((k) => { const I = ICONS[k]; return (
             <button key={k} disabled={busy} onClick={() => quick(k)} className="tap flex flex-col items-center gap-1 rounded-xl bg-card p-3 text-sm font-bold shadow-card disabled:opacity-60">
               <I className="size-6 text-primary" />{k === "familia" ? "Familia" : k === "voluntario" ? "Voluntario" : "ONG"}
             </button>
           ); })}
         </div>
+        <Link
+          to="/consola"
+          className="flex items-center justify-between rounded-xl border border-primary/20 bg-card px-3 py-2 text-xs font-bold text-primary hover:bg-primary/5"
+        >
+          <span>¿Evaluando OYE en escritorio para ONG o aseguradora?</span>
+          <span className="font-extrabold">Ir a Consola →</span>
+        </Link>
       </div>
       <div className="mt-4 space-y-3">
         <BigButton tone="ghost" onClick={() => social("google")}>Continuar con Google</BigButton>

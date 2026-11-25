@@ -3,6 +3,8 @@ import { AlertCircle, Check, Copy, FlaskConical, Loader2, PhoneIncoming, Play, S
 
 type LivePipelineTesterProps = {
   seniorName?: string;
+  /** Restricts unauthenticated public showcase views from looking up real senior phones/contacts. */
+  publicSafe?: boolean;
 };
 
 type TesterMode = "analyze" | "inbound" | "midcall";
@@ -19,6 +21,12 @@ const PRESETS: SandboxPreset[] = [
     label: "Soledad implícita + Recuerdo",
     transcript:
       "AGENT [1s]: Buenos días, ¿cómo ha amanecido hoy?\nUSER [5s]: Dormí bastante bien, aunque la casa se me hace muy grande desde que mis nietos volvieron a Bilbao y hoy no llamó nadie.\nAGENT [18s]: ¿Se tomó la pastilla y desayunó algo?\nUSER [22s]: Sí, café con tostada y mi pastilla. Me acordé de cuando en verano íbamos a San Sebastián a pasear por la Concha.",
+  },
+  {
+    id: "negacion_segura",
+    label: "Negación Segura (Sin Falso ROJO)",
+    transcript:
+      "AGENT [1s]: Hola, ¿cómo pasó la noche?\nUSER [4s]: Muy bien hija, no me duele nada, ni el pecho ni la cabeza. Hoy no me he mareado ni me he caído. Desayuné tostada con aceite y ya me tomé mi pastilla de las nueve.",
   },
   {
     id: "medicacion_mareo",
@@ -86,7 +94,10 @@ type MidCallResult = {
   agent_containment_script?: string;
 };
 
-export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTesterProps) {
+export function LivePipelineTester({
+  seniorName = "Carmen",
+  publicSafe = false,
+}: LivePipelineTesterProps) {
   const [mode, setMode] = useState<TesterMode>("analyze");
   const [transcriptText, setTranscriptText] = useState(PRESETS[0]!.transcript);
   const [inboundPhone, setInboundPhone] = useState("+34678617031");
@@ -277,6 +288,40 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
           />
         </>
+      ) : publicSafe ? (
+        <div className="rounded-xl border border-indigo-200 bg-white p-3.5 space-y-2.5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-extrabold text-indigo-950">
+              {mode === "inbound"
+                ? "Contrato Entrante 24/7 (inbound-call-context)"
+                : "Contrato Urgencia Intra-Llamada (<300 ms · mid-call-alert)"}
+            </span>
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+              Protegido por RGPD / Consola
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-600 leading-relaxed">
+            {mode === "inbound"
+              ? "Para evitar enumeración pública de teléfonos reales, la prueba en vivo de Caller ID contra la base de mayores (ficha médica, recuerdos y plan de barrio del día) está habilitada dentro de la Consola de Coordinación."
+              : "Para proteger contactos de emergencia y evitar consultas anónimas a fichas reales, el simulacro dry_run con lectura de contacto clave se ejecuta dentro de la Consola autenticada."}
+          </p>
+          <pre className="overflow-x-auto rounded-lg bg-slate-950 p-2.5 text-[10px] text-slate-100">
+            {mode === "inbound"
+              ? `POST /functions/v1/inbound-call-context\n{ "caller_id": "+346XXXXXXXX" }\n→ { "matched_senior": true, "latency_ms": <120, "dynamic_variables": { "recurso_barrio_hoy": "..." } }`
+              : `POST /functions/v1/mid-call-alert\n{ "person_id": "<uuid>", "category": "caida", "dry_run": true }\n→ { "ok": true, "latency_ms": 210, "agent_containment_script": "Mantén la calma..." }`}
+          </pre>
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[11px] font-semibold text-slate-500">
+              El análisis GPT-4o Post-Llamada (pestaña 1) funciona 100% en vivo aquí sin tocar BD.
+            </span>
+            <a
+              href="/consola"
+              className="inline-flex items-center gap-1 rounded-lg bg-indigo-700 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-indigo-800"
+            >
+              Probar en Consola ONG →
+            </a>
+          </div>
+        </div>
       ) : mode === "inbound" ? (
         <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-center">
           <input
@@ -314,29 +359,31 @@ export function LivePipelineTester({ seniorName = "Carmen" }: LivePipelineTester
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          type="button"
-          disabled={running || (mode === "analyze" && !transcriptText.trim())}
-          onClick={() => void runLiveAudit()}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition cursor-pointer"
-        >
-          {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-          {running
-            ? "Ejecutando..."
-            : mode === "analyze"
-            ? "Ejecutar auditoría en vivo"
-            : mode === "inbound"
-            ? "Probar identificación Caller ID"
-            : "Simular alerta <2s (dry_run)"}
-        </button>
+      {(!publicSafe || mode === "analyze") && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            disabled={running || (mode === "analyze" && !transcriptText.trim())}
+            onClick={() => void runLiveAudit()}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+          >
+            {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+            {running
+              ? "Ejecutando..."
+              : mode === "analyze"
+              ? "Ejecutar auditoría en vivo"
+              : mode === "inbound"
+              ? "Probar identificación Caller ID"
+              : "Simular alerta <2s (dry_run)"}
+          </button>
 
-        {latencyMs !== null && !running && (
-          <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
-            Latencia pipeline: {(latencyMs / 1000).toFixed(2)}s
-          </span>
-        )}
-      </div>
+          {latencyMs !== null && !running && (
+            <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
+              Latencia pipeline: {(latencyMs / 1000).toFixed(2)}s
+            </span>
+          )}
+        </div>
+      )}
 
       {errorMsg && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 flex items-center gap-2">

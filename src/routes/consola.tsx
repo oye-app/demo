@@ -1,12 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity,
   AlertTriangle,
   BarChart3,
   Building2,
+  Calculator,
   CalendarClock,
   CalendarOff,
   CheckCircle2,
@@ -16,6 +17,7 @@ import {
   Download,
   FileSpreadsheet,
   HandHeart,
+  Keyboard,
   KeyRound,
   LogOut,
   MapPin,
@@ -32,6 +34,7 @@ import {
   Smartphone,
   Sparkles,
   Users,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { OyeLogo } from "@/components/oye";
@@ -201,12 +204,20 @@ function ConsoleSignInScreen({
               Consola Web ONG · Teleasistencia · Aseguradoras
             </span>
           </div>
-          <Link
-            to="/bienvenida"
-            className="inline-flex items-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-bold hover:bg-secondary"
-          >
-            <Smartphone className="size-3.5" /> App Móvil Familia / Voluntario
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/empresas"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/8 px-3 py-2 text-xs font-extrabold text-primary hover:bg-primary/15"
+            >
+              <Calculator className="size-3.5" /> Portal Empresas & ROI
+            </Link>
+            <Link
+              to="/bienvenida"
+              className="inline-flex items-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-bold hover:bg-secondary"
+            >
+              <Smartphone className="size-3.5" /> App Móvil Familia / Voluntario
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -260,6 +271,18 @@ function ConsoleSignInScreen({
                 </div>
               );
             })}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-card px-4 py-3 text-xs shadow-xs">
+            <p className="text-muted-foreground">
+              <strong className="text-foreground">Evaluación directa sin credenciales:</strong> simula tu cohorte (100–50.000 mayores) y prueba el Sandbox GPT-4o en el portal B2B.
+            </p>
+            <Link
+              to="/empresas"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-1.5 font-extrabold text-primary hover:bg-secondary/80"
+            >
+              <Calculator className="size-3.5" /> Abrir Portal /empresas →
+            </Link>
           </div>
         </section>
 
@@ -402,6 +425,31 @@ function ConsoleWorkspace({
   const [tab, setTab] = useState<ConsoleTab>("triaje");
   const [selectedId, setSelectedId] = useState<string>("");
   const [importOpen, setImportOpen] = useState(false);
+  const [showDemoGuide, setShowDemoGuide] = useState<boolean>(true);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName ?? "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+
+      const tabByKey: Record<string, ConsoleTab> = {
+        "1": "triaje",
+        "2": "agenda",
+        "3": "censo",
+        "4": "voluntarios",
+        "5": "impacto",
+      };
+      const nextTab = tabByKey[e.key];
+      if (nextTab) {
+        e.preventDefault();
+        setTab(nextTab);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (census.length === 0) return;
@@ -544,6 +592,13 @@ function ConsoleWorkspace({
               Exportar CSV
             </button>
             <Link
+              to="/empresas"
+              className="inline-flex items-center gap-1.5 rounded-xl border bg-card px-3 py-2 text-xs font-bold text-primary hover:bg-secondary"
+            >
+              <Calculator className="size-3.5" />
+              Portal B2B & ROI
+            </Link>
+            <Link
               to="/"
               className="inline-flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/80"
             >
@@ -642,7 +697,54 @@ function ConsoleWorkspace({
         </aside>
 
         {/* Main Workspace */}
-        <main className="min-w-0 flex-1">
+        <main className="min-w-0 flex-1 space-y-4">
+          {showDemoGuide && (
+            <section
+              aria-label="Guía rápida de evaluación desktop B2B"
+              className="hidden items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-card px-4 py-2.5 shadow-xs print:hidden md:flex"
+            >
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 font-extrabold text-primary">
+                  <Sparkles className="size-3.5" /> Ruta Demo B2B:
+                </span>
+                {(
+                  [
+                    ["triaje", "1. Triaje SLA & Radar"],
+                    ["agenda", "2. Agenda & Watchdog"],
+                    ["voluntarios", "3. Despacho & Barrio"],
+                    ["impacto", "4. Dossier ROI · FHIR · HMAC"],
+                  ] as const
+                ).map(([targetTab, label]) => (
+                  <button
+                    key={targetTab}
+                    type="button"
+                    onClick={() => setTab(targetTab)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors cursor-pointer ${
+                      tab === targetTab
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary/70 text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="hidden xl:inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
+                  <Keyboard className="size-3" /> 1–5 Vistas · / Buscar · J/K Cola
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowDemoGuide(false)}
+                  aria-label="Ocultar guía de evaluación"
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            </section>
+          )}
+
           {loadingCensus ? (
             <div className="rounded-3xl border bg-card p-12 text-center text-sm text-muted-foreground shadow-sm">
               Cargando censo longitudinal en tiempo real…
@@ -703,6 +805,7 @@ function TriageCommandView({
 }) {
   const [queueFilter, setQueueFilter] = useState<"all" | "urgent" | "green">("all");
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -717,6 +820,40 @@ function TriageCommandView({
       return true;
     });
   }, [census, queueFilter, search]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName ?? "";
+      if (e.key === "Escape" && target === searchInputRef.current) {
+        searchInputRef.current?.blur();
+        return;
+      }
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+
+      if (e.key === "/") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if ((e.key === "j" || e.key === "k" || e.key === "ArrowDown" || e.key === "ArrowUp") && filtered.length > 0) {
+        e.preventDefault();
+        const currentIdx = filtered.findIndex((r) => r.senior_id === selected?.senior_id);
+        const delta = e.key === "j" || e.key === "ArrowDown" ? 1 : -1;
+        const nextIdx =
+          currentIdx < 0
+            ? 0
+            : Math.min(filtered.length - 1, Math.max(0, currentIdx + delta));
+        const nextRow = filtered[nextIdx];
+        if (nextRow) onSelect(nextRow.senior_id);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filtered, selected, onSelect]);
 
   const greenCount = census.filter((r) => classifyUrgencyTier(r).tier === "green").length;
   const urgentCount = census.filter((r) => {
@@ -772,13 +909,17 @@ function TriageCommandView({
             <div className="relative">
               <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
               <input
+                ref={searchInputRef}
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar mayor, barrio, medicación…"
                 aria-label="Buscar en cola de triaje"
-                className="h-9 w-full rounded-xl border bg-background pr-3 pl-9 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="h-9 w-full rounded-xl border bg-background pr-16 pl-9 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
+              <kbd className="pointer-events-none absolute top-2 right-2.5 hidden rounded border bg-secondary px-1.5 py-0.5 font-mono text-[10px] font-bold text-muted-foreground sm:inline-block">
+                / · J/K
+              </kbd>
             </div>
           </div>
 

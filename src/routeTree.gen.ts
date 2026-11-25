@@ -13,6 +13,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BienvenidaRouteImport } from './routes/bienvenida'
 import { Route as ConsolaRouteImport } from './routes/consola'
+import { Route as EmpresasRouteImport } from './routes/empresas'
 import { Route as RecomendarRouteImport } from './routes/recomendar'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAvisosRouteImport } from './routes/_authenticated/avisos'
@@ -42,6 +43,11 @@ const BienvenidaRoute = BienvenidaRouteImport.update({
 const ConsolaRoute = ConsolaRouteImport.update({
   id: '/consola',
   path: '/consola',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EmpresasRoute = EmpresasRouteImport.update({
+  id: '/empresas',
+  path: '/empresas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RecomendarRoute = RecomendarRouteImport.update({
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/bienvenida': typeof BienvenidaRoute
   '/consola': typeof ConsolaRoute
+  '/empresas': typeof EmpresasRoute
   '/recomendar': typeof RecomendarRoute
   '/avisos': typeof AuthenticatedAvisosRoute
   '/historial': typeof AuthenticatedHistorialRoute
@@ -120,6 +127,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/bienvenida': typeof BienvenidaRoute
   '/consola': typeof ConsolaRoute
+  '/empresas': typeof EmpresasRoute
   '/recomendar': typeof RecomendarRoute
   '/avisos': typeof AuthenticatedAvisosRoute
   '/historial': typeof AuthenticatedHistorialRoute
@@ -138,6 +146,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/bienvenida': typeof BienvenidaRoute
   '/consola': typeof ConsolaRoute
+  '/empresas': typeof EmpresasRoute
   '/recomendar': typeof RecomendarRoute
   '/_authenticated/avisos': typeof AuthenticatedAvisosRoute
   '/_authenticated/historial': typeof AuthenticatedHistorialRoute
@@ -157,6 +166,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/bienvenida'
     | '/consola'
+    | '/empresas'
     | '/recomendar'
     | '/avisos'
     | '/historial'
@@ -172,6 +182,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/bienvenida'
     | '/consola'
+    | '/empresas'
     | '/recomendar'
     | '/avisos'
     | '/historial'
@@ -189,6 +200,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/bienvenida'
     | '/consola'
+    | '/empresas'
     | '/recomendar'
     | '/_authenticated/avisos'
     | '/_authenticated/historial'
@@ -207,6 +219,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   BienvenidaRoute: typeof BienvenidaRoute
   ConsolaRoute: typeof ConsolaRoute
+  EmpresasRoute: typeof EmpresasRoute
   RecomendarRoute: typeof RecomendarRoute
   ApiStartCallRoute: typeof ApiStartCallRoute
   ApiConsoleWebhookTestRoute: typeof ApiConsoleWebhookTestRoute
@@ -242,6 +255,13 @@ declare module '@tanstack/react-router' {
       path: '/consola'
       fullPath: '/consola'
       preLoaderRoute: typeof ConsolaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/empresas': {
+      id: '/empresas'
+      path: '/empresas'
+      fullPath: '/empresas'
+      preLoaderRoute: typeof EmpresasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/recomendar': {
@@ -350,6 +370,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   BienvenidaRoute: BienvenidaRoute,
   ConsolaRoute: ConsolaRoute,
+  EmpresasRoute: EmpresasRoute,
   RecomendarRoute: RecomendarRoute,
   ApiStartCallRoute: ApiStartCallRoute,
   ApiConsoleWebhookTestRoute: ApiConsoleWebhookTestRoute,
